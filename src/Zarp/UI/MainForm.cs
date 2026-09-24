@@ -21,7 +21,8 @@ namespace Zarp.UI
         readonly ToolStripMenuItem _trayToggle = new ToolStripMenuItem();
 
         Icon _iconOn, _iconOff, _iconBusy;
-        bool _exiting, _trayHintShown;
+        bool _exiting, _exitComplete, _trayHintShown;
+        CloseActionForm _closePrompt;
         const int CompactHeight = 500, LogHeight = 190;
 
         public MainForm(Engine engine, bool autostart, bool connectNow)
@@ -153,6 +154,7 @@ namespace Zarp.UI
             UpdateUi();
             foreach (var line in StartupLog.Drain()) AppendLog(line);
             await _engine.RefreshStateAsync();
+            if (_exiting || IsDisposed) return;
             _engine.StartBackgroundUpdates();
             if (_engine.State != EngineState.Idle) return;
             // --connect: подключиться сразу (найдёт стратегию, если её ещё нет)
@@ -274,25 +276,50 @@ namespace Zarp.UI
 
         protected override async void OnFormClosing(FormClosingEventArgs e)
         {
-            if (!_exiting && e.CloseReason == CloseReason.UserClosing && _engine.Config.MinimizeToTray)
+            // Не закрывать окно повторным запросом, пока выполняется отключение.
+            if (_exiting)
+            {
+                e.Cancel = !_exitComplete;
+                base.OnFormClosing(e);
+                return;
+            }
+            if (e.CloseReason == CloseReason.UserClosing)
             {
                 e.Cancel = true;
-                Hide();
-                if (!_trayHintShown)
+                if (_closePrompt != null) return;
+                bool minimizeToTray = _engine.Config.MinimizeToTray;
+                if (_engine.Config.AskBeforeClose)
                 {
-                    _trayHintShown = true;
-                    _tray.ShowBalloonTip(3000, "Zarp работает в фоне",
-                        "Иконка в трее. Чтобы выйти совсем: правый клик → Выход.", ToolTipIcon.Info);
+                    using (var prompt = new CloseActionForm(minimizeToTray, _engine.Config.DisconnectOnExit))
+                    {
+                        _closePrompt = prompt;
+                        DialogResult result;
+                        try { result = prompt.ShowDialog(this); }
+                        finally { _closePrompt = null; }
+                        if (_exiting || result != DialogResult.OK) return;
+                        minimizeToTray = prompt.MinimizeToTray;
+                        if (prompt.RememberChoice)
+                        {
+                            _engine.Config.MinimizeToTray = minimizeToTray;
+                            _engine.Config.AskBeforeClose = false;
+                            _engine.Config.Save();
+                        }
+                    }
                 }
-                return;
+                if (minimizeToTray)
+                {
+                    Hide();
+                    if (!_trayHintShown)
+                    {
+                        _trayHintShown = true;
+                        _tray.ShowBalloonTip(3000, "Zarp работает в фоне",
+                            "Иконка в трее. Чтобы выйти совсем: правый клик → Выход.", ToolTipIcon.Info);
+                    }
+                    return;
+                }
             }
-            if (!_exiting)
-            {
-                e.Cancel = true;
-                await ExitApp();
-                return;
-            }
-            base.OnFormClosing(e);
+            e.Cancel = true;
+            await ExitApp();
         }
 
         System.Threading.Tasks.Task ExitApp() => ExitAsync(handover: false);
@@ -304,6 +331,7 @@ namespace Zarp.UI
         {
             if (_exiting) return;
             _exiting = true;
+            if (_closePrompt != null) _closePrompt.DialogResult = DialogResult.Cancel;
             Hide();
             _tray.Visible = false;
             if (handover)
@@ -316,7 +344,9 @@ namespace Zarp.UI
             {
                 await _engine.ShutdownAsync();
             }
-            Application.Exit();
+            _exitComplete = true;
+            // Если отключение завершилось синхронно, сначала дать закончиться OnFormClosing.
+            BeginInvoke((Action)Close);
         }
 
         protected override void Dispose(bool disposing)

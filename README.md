@@ -29,8 +29,10 @@ One-click Cloudflare WARP for networks that block it. Zarp finds a [zapret2](htt
 2. Press the power button. The first search takes a minute or two.
 3. Done. Change the strategy any time in Settings.
 
+Closing the window asks whether to hide Zarp in the tray or quit. Select **Remember my choice** to make that action the default. Settings → **При закрытии** lets you choose **Спрашивать каждый раз**, **Скрывать в трей** or **Закрывать приложение**. **Exit** in the tray menu always quits.
+
 > [!NOTE]
-> **"Windows protected your PC"?** `Zarp.exe` is not code-signed yet, so SmartScreen warns about every new release until it builds up reputation. Click **More info → Run anyway**, or check the file first (see [Verify the download](#verify-the-download)).
+> **"Windows protected your PC"?** Older releases and local builds may be unsigned. Release signing requires maintainer setup; see [code signing](docs/code-signing.md). A trusted signature identifies the publisher, but new releases can still trigger SmartScreen while reputation builds. [Verify the download](#verify-the-download) before running it.
 
 > [!NOTE]
 > Turn off any other VPN (Happ, v2rayN, Clash, AmneziaVPN, ...). WARP traffic would go through its tunnel instead and no strategy would be found. Zarp warns you when it sees one.
@@ -70,7 +72,14 @@ See the [zapret2 manual](https://github.com/bol-van/zapret2/blob/master/docs/man
 
 Requires the .NET SDK 6 or later (the target is .NET Framework 4.8). `tools/fetch-zapret.ps1` packs the latest zapret2 release into `vendor/zapret2.zip`, which gets embedded into the exe.
 
-GitHub Actions builds every push. Pushing a `v*` tag publishes `Zarp.exe` to Releases.
+GitHub Actions builds every push. Publishing a `v*` tag requires [SignPath setup](docs/code-signing.md): the workflow signs and verifies the final `Zarp.exe` before publishing it. Missing signing configuration or an invalid signature stops the release.
+
+UI regression checks (Windows; no WARP/WinDivert changes):
+
+```powershell
+dotnet build tests/Zarp.Tests/Zarp.Tests.csproj -c Release -o build/tests
+.\build\tests\Zarp.Tests.exe
+```
 
 ## License
 

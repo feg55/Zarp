@@ -18,7 +18,7 @@ namespace Zarp.UI
         readonly NumberBox _stopAfter = new NumberBox { Minimum = 0, Maximum = 100 };
         readonly ToggleSwitch _autoConnect = new ToggleSwitch("Подключаться при запуске программы");
         readonly ToggleSwitch _autostart = new ToggleSwitch("Запускать вместе с Windows");
-        readonly ToggleSwitch _tray = new ToggleSwitch("Сворачивать в трей при закрытии окна");
+        readonly ComboBox _closeAction = new ComboBox();
         readonly ToggleSwitch _disconnectOnExit = new ToggleSwitch("Отключать WARP при выходе");
         readonly ToggleSwitch _restrict = new ToggleSwitch("Перехватывать только адреса WARP");
         readonly ToggleSwitch _isolate = new ToggleSwitch("Изолировать тесты (новый эндпоинт на каждый)");
@@ -120,7 +120,34 @@ namespace Zarp.UI
                 Location = new Point(L, 442), Size = new Size(420, 250),
                 Anchor = AnchorStyles.Left | AnchorStyles.Bottom,
             };
-            toggles.Controls.AddRange(new Control[] { _autoConnect, _autostart, _tray, _disconnectOnExit, _restrict, _isolate, _autoUpdate });
+            var closeOptions = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.LeftToRight, WrapContents = false,
+                Size = new Size(420, 32), Margin = new Padding(0, 0, 0, 6),
+            };
+            closeOptions.Controls.Add(new Label
+            {
+                Text = "При закрытии:", AutoSize = true, Margin = new Padding(0, 5, 12, 0),
+            });
+            _closeAction.DropDownStyle = ComboBoxStyle.DropDownList;
+            _closeAction.FlatStyle = FlatStyle.Flat;
+            _closeAction.BackColor = Theme.Panel;
+            _closeAction.ForeColor = Theme.Text;
+            _closeAction.DrawMode = DrawMode.OwnerDrawFixed;
+            _closeAction.DrawItem += (s, e) =>
+            {
+                using (var background = new SolidBrush((e.State & DrawItemState.Selected) != 0 ? Theme.PanelHover : Theme.Panel))
+                    e.Graphics.FillRectangle(background, e.Bounds);
+                if (e.Index >= 0)
+                    TextRenderer.DrawText(e.Graphics, _closeAction.Items[e.Index].ToString(), e.Font,
+                        e.Bounds, Theme.Text, TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
+                e.DrawFocusRectangle();
+            };
+            _closeAction.Width = 240;
+            _closeAction.AccessibleName = "Действие при закрытии окна";
+            _closeAction.Items.AddRange(new object[] { "Спрашивать каждый раз", "Скрывать в трей", "Закрывать приложение" });
+            closeOptions.Controls.Add(_closeAction);
+            toggles.Controls.AddRange(new Control[] { _autoConnect, _autostart, closeOptions, _disconnectOnExit, _restrict, _isolate, _autoUpdate });
 
             const int R = 470; // правая колонка
             var timeoutLbl = Lbl("Ожидание подключения, с", new Point(R, 446));
@@ -177,8 +204,9 @@ namespace Zarp.UI
             });
 
             LoadOptions();
-            foreach (var c in new[] { _autoConnect, _tray, _disconnectOnExit, _restrict, _isolate, _autoUpdate })
+            foreach (var c in new[] { _autoConnect, _disconnectOnExit, _restrict, _isolate, _autoUpdate })
                 c.CheckedChanged += (s, e) => SaveOptions();
+            _closeAction.SelectedIndexChanged += (s, e) => SaveOptions();
             _timeout.ValueChanged += (s, e) => SaveOptions();
             _stopAfter.ValueChanged += (s, e) => SaveOptions();
             _autostart.CheckedChanged += async (s, e) =>
@@ -238,14 +266,20 @@ namespace Zarp.UI
             _loading = true;
             var c = _engine.Config;
             _autoConnect.Checked = c.AutoConnectOnStart;
-            _tray.Checked = c.MinimizeToTray;
+            _closeAction.SelectedIndex = c.AskBeforeClose ? 0 : c.MinimizeToTray ? 1 : 2;
             _disconnectOnExit.Checked = c.DisconnectOnExit;
             _restrict.Checked = c.RestrictToWarpIps;
             _isolate.Checked = c.IsolateTests;
             _autoUpdate.Checked = c.AutoUpdateZapret;
             _timeout.Value = c.TestTimeoutSec;
             _stopAfter.Value = c.StopAfterWorking;
-            _autostart.Checked = await Autostart.IsEnabledAsync();
+            _loading = false;
+            _autostart.Enabled = false;
+            bool autostart = await Autostart.IsEnabledAsync();
+            if (IsDisposed) return;
+            _loading = true;
+            _autostart.Checked = autostart;
+            _autostart.Enabled = true;
             _loading = false;
         }
 
@@ -254,7 +288,8 @@ namespace Zarp.UI
             if (_loading) return;
             var c = _engine.Config;
             c.AutoConnectOnStart = _autoConnect.Checked;
-            c.MinimizeToTray = _tray.Checked;
+            c.AskBeforeClose = _closeAction.SelectedIndex == 0;
+            if (!c.AskBeforeClose) c.MinimizeToTray = _closeAction.SelectedIndex == 1;
             c.DisconnectOnExit = _disconnectOnExit.Checked;
             c.RestrictToWarpIps = _restrict.Checked;
             c.IsolateTests = _isolate.Checked;

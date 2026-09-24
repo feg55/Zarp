@@ -34,6 +34,8 @@ namespace Zarp.Core
         /// <summary>Сколько рабочих стратегий найти, прежде чем остановить поиск (0 - проверить все).</summary>
         public int StopAfterWorking { get; set; } = 3;
         public bool AutoConnectOnStart { get; set; } = false;
+        /// <summary>Спрашивать при закрытии окна, пока пользователь не запомнит действие.</summary>
+        public bool AskBeforeClose { get; set; } = true;
         public bool MinimizeToTray { get; set; } = true;
         public bool DisconnectOnExit { get; set; } = true;
         /// <summary>Перехватывать только трафик на адреса WARP (рекомендуется).</summary>

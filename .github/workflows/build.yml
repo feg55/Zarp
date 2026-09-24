@@ -8,6 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read       # SignPath: получить артефакт сборки
   contents: write      # публикация релиза
   id-token: write      # attestation: подтверждение, что exe собран здесь
   attestations: write
@@ -21,6 +22,21 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
+
+      - name: Require release signing configuration
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          SIGNPATH_SIGNING_POLICY_SLUG: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+        run: |
+          foreach ($name in @('SIGNPATH_API_TOKEN', 'SIGNPATH_ORGANIZATION_ID', 'SIGNPATH_PROJECT_SLUG', 'SIGNPATH_SIGNING_POLICY_SLUG')) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "Missing $name. Configure release signing using docs/code-signing.md before publishing a tag."
+            }
+          }
 
       - name: Fetch zapret2
         shell: powershell
@@ -38,6 +54,52 @@ jobs:
       - name: Build
         run: dotnet build src/Zarp/Zarp.csproj -c Release -o out "-p:Version=${{ steps.ver.outputs.version }}"
 
+      - name: Build UI regression checks
+        run: dotnet build tests/Zarp.Tests/Zarp.Tests.csproj -c Release -o build/tests "-p:Version=${{ steps.ver.outputs.version }}"
+
+      - name: Check close behavior and VPN detection
+        run: ./build/tests/Zarp.Tests.exe
+
+      - name: Check unsigned release rejection
+        shell: pwsh
+        run: |
+          try {
+            ./tools/verify-signature.ps1 -Path out/Zarp.exe
+            throw 'Unsigned binary was accepted'
+          } catch {
+            if ($_.Exception.Message -notlike 'Release signature is not valid: NotSigned.*') { throw }
+            Write-Output 'Unsigned release correctly rejected'
+          }
+
+      - name: Upload signing input
+        if: github.ref_type == 'tag'
+        id: unsigned
+        uses: actions/upload-artifact@v4
+        with:
+          name: Zarp-signing-input
+          path: out/Zarp.exe
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Sign release
+        if: github.ref_type == 'tag'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed
+
+      - name: Verify and stage signed release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        run: |
+          ./tools/verify-signature.ps1 -Path signed/Zarp.exe
+          Copy-Item -LiteralPath signed/Zarp.exe -Destination out/Zarp.exe -Force
+
       - name: SHA-256
         id: sha
         shell: pwsh
@@ -46,7 +108,7 @@ jobs:
           "hash=$h" >> $env:GITHUB_OUTPUT
           "SHA-256: $h" >> $env:GITHUB_STEP_SUMMARY
 
-      # Подписи кода пока нет, поэтому происхождение файла подтверждаем attestation от GitHub:
+      # Attestation подтверждает происхождение окончательного файла; Authenticode — его издателя.
       # gh attestation verify Zarp.exe --repo <owner>/<repo>
       - name: Attest build provenance
         if: github.event_name != 'pull_request'
@@ -58,6 +120,7 @@ jobs:
         with:
           name: Zarp
           path: out/Zarp.exe
+          if-no-files-found: error
 
       - name: Release
         if: github.ref_type == 'tag'
@@ -66,6 +129,8 @@ jobs:
           files: out/Zarp.exe
           generate_release_notes: true
           body: |
+            This release is Authenticode-signed. Verify the publisher in the file's Digital Signatures tab.
+
             **Zarp.exe SHA-256:** `${{ steps.sha.outputs.hash }}`
 
             Check that the file was built by GitHub Actions from this repository:

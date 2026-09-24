@@ -33,6 +33,8 @@ namespace Zarp.Core
 
         CancellationTokenSource _cts;
         readonly SemaphoreSlim _busy = new SemaphoreSlim(1, 1);
+        volatile bool _stopping;
+        Task _shutdownTask;
 
         public Engine(string dataDir)
         {
@@ -141,7 +143,7 @@ namespace Zarp.Core
             Task.Run(async () =>
             {
                 await Task.Delay(TimeSpan.FromMinutes(1)); // не мешаем запуску и автоподключению
-                while (true)
+                while (!_stopping)
                 {
                     if (Config.AutoUpdateZapret) await CheckZapretUpdateAsync(false);
                     await Task.Delay(TimeSpan.FromHours(12));
@@ -152,6 +154,7 @@ namespace Zarp.Core
         /// <summary>Проверить и, если есть, скачать и применить новую версию zapret2.</summary>
         public async Task CheckZapretUpdateAsync(bool verbose)
         {
+            if (_stopping) return;
             string tag;
             try
             {
@@ -168,6 +171,7 @@ namespace Zarp.Core
                 return;
             }
             Log.Write($"Скачана новая версия zapret2 {tag}.");
+            if (_stopping) return;
 
             // применяем сразу, если ничего не делаем; иначе - при следующем запуске winws2
             if (!await _busy.WaitAsync(0))
@@ -177,6 +181,7 @@ namespace Zarp.Core
             }
             try
             {
+                if (_stopping) return;
                 var s = Selected;
                 if (State == EngineState.Connected && s != null && s.UsesZapret && Zapret.Running)
                 {
@@ -198,23 +203,35 @@ namespace Zarp.Core
         }
 
         /// <summary>Уступить место другой копии: всегда отключить WARP и остановить winws2, независимо от настроек.</summary>
-        public async Task StopForHandoverAsync()
-        {
-            Cancel();
-            await StopAllAsync();
-        }
+        public Task StopForHandoverAsync() => StopAsync(disconnect: true);
 
         /// <summary>Остановить всё при выходе из программы.</summary>
-        public async Task ShutdownAsync()
+        public Task ShutdownAsync() => StopAsync(Config.DisconnectOnExit);
+
+        Task StopAsync(bool disconnect)
         {
+            if (_shutdownTask != null) return _shutdownTask;
+            _stopping = true;
             Cancel();
-            if (Config.DisconnectOnExit)
-                await StopAllAsync();
+            return _shutdownTask = FinishShutdownAsync(disconnect);
+        }
+
+        async Task FinishShutdownAsync(bool disconnect)
+        {
+            // StartAsync/warp-cli не всегда завершаются сразу после Cancel: дождаться
+            // операции и её очистки, чтобы она не запустила winws2 уже после выхода.
+            await _busy.WaitAsync();
+            try
+            {
+                if (disconnect) await StopAllAsync();
+            }
+            finally { _busy.Release(); }
         }
 
         async Task Run(Func<CancellationToken, Task> body)
         {
-            if (!await _busy.WaitAsync(0)) return; // уже чем-то заняты
+            if (_stopping || !await _busy.WaitAsync(0)) return; // выходим или уже чем-то заняты
+            if (_stopping) { _busy.Release(); return; }
             _cts = new CancellationTokenSource();
             try
             {
