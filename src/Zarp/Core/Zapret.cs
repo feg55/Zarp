@@ -541,24 +541,6 @@ namespace Zarp.Core
                 }
         }
 
-        [DllImport("kernel32.dll", SetLastError = true)]
-        static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
-        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        static extern bool QueryFullProcessImageName(IntPtr h, int flags, StringBuilder name, ref int size);
-        [DllImport("kernel32.dll")]
-        static extern bool CloseHandle(IntPtr h);
-
-        static string GetProcessPath(Process p)
-        {
-            IntPtr h = OpenProcess(0x1000 /* PROCESS_QUERY_LIMITED_INFORMATION */, false, p.Id);
-            if (h == IntPtr.Zero) return null;
-            try
-            {
-                var sb = new StringBuilder(1024);
-                int size = sb.Capacity;
-                return QueryFullProcessImageName(h, 0, sb, ref size) ? sb.ToString() : null;
-            }
-            finally { CloseHandle(h); }
-        }
+        static string GetProcessPath(Process p) => ProcessUtil.GetProcessPath(p);
     }
 }

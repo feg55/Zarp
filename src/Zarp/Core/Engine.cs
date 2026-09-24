@@ -197,6 +197,13 @@ namespace Zarp.Core
             }
         }
 
+        /// <summary>Уступить место другой копии: всегда отключить WARP и остановить winws2, независимо от настроек.</summary>
+        public async Task StopForHandoverAsync()
+        {
+            Cancel();
+            await StopAllAsync();
+        }
+
         /// <summary>Остановить всё при выходе из программы.</summary>
         public async Task ShutdownAsync()
         {

@@ -1,5 +1,7 @@
 using System;
 using System.Diagnostics;
+using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -50,6 +52,36 @@ namespace Zarp.Core
                     lock (sb) return new RunResult { ExitCode = p.ExitCode, Output = sb.ToString().Trim() };
                 }
             });
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        static extern bool QueryFullProcessImageName(IntPtr h, int flags, StringBuilder name, ref int size);
+        [DllImport("kernel32.dll")]
+        static extern bool CloseHandle(IntPtr h);
+
+        /// <summary>
+        /// Полный путь exe процесса или null. В отличие от Process.MainModule работает
+        /// и для 64-битных процессов, и для процессов с правами администратора.
+        /// </summary>
+        public static string GetProcessPath(Process p)
+        {
+            IntPtr h = OpenProcess(0x1000 /* PROCESS_QUERY_LIMITED_INFORMATION */, false, p.Id);
+            if (h == IntPtr.Zero) return null;
+            try
+            {
+                var sb = new StringBuilder(1024);
+                int size = sb.Capacity;
+                return QueryFullProcessImageName(h, 0, sb, ref size) ? sb.ToString() : null;
+            }
+            finally { CloseHandle(h); }
+        }
+
+        public static bool SamePath(string a, string b)
+        {
+            try { return string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase); }
+            catch { return false; }
         }
     }
 }

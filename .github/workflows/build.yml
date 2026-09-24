@@ -8,7 +8,9 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write   # для публикации релиза
+  contents: write      # публикация релиза
+  id-token: write      # attestation: подтверждение, что exe собран здесь
+  attestations: write
 
 jobs:
   build:
@@ -36,6 +38,22 @@ jobs:
       - name: Build
         run: dotnet build src/Zarp/Zarp.csproj -c Release -o out "-p:Version=${{ steps.ver.outputs.version }}"
 
+      - name: SHA-256
+        id: sha
+        shell: pwsh
+        run: |
+          $h = (Get-FileHash out/Zarp.exe -Algorithm SHA256).Hash.ToLower()
+          "hash=$h" >> $env:GITHUB_OUTPUT
+          "SHA-256: $h" >> $env:GITHUB_STEP_SUMMARY
+
+      # Подписи кода пока нет, поэтому происхождение файла подтверждаем attestation от GitHub:
+      # gh attestation verify Zarp.exe --repo <owner>/<repo>
+      - name: Attest build provenance
+        if: github.event_name != 'pull_request'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: out/Zarp.exe
+
       - uses: actions/upload-artifact@v4
         with:
           name: Zarp
@@ -47,3 +65,8 @@ jobs:
         with:
           files: out/Zarp.exe
           generate_release_notes: true
+          body: |
+            **Zarp.exe SHA-256:** `${{ steps.sha.outputs.hash }}`
+
+            Check that the file was built by GitHub Actions from this repository:
+            `gh attestation verify Zarp.exe --repo ${{ github.repository }}`

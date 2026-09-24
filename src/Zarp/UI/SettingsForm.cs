@@ -158,6 +158,14 @@ namespace Zarp.UI
             close.Location = new Point(ClientSize.Width - L - 110, ClientSize.Height - 34 - 16);
             close.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
             close.Click += (s, e) => Close();
+            var licenses = Theme.FlatButton("Лицензии", 110);
+            licenses.Location = new Point(close.Left - 118, close.Top);
+            licenses.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
+            licenses.Click += (s, e) =>
+            {
+                string dir = Licenses.Extract(_engine.DataDir);
+                Process.Start("explorer.exe", "/select,\"" + Path.Combine(dir, Licenses.NoticesFile) + "\"");
+            };
 
             foreach (var c in new Control[] { timeoutLbl, _timeout, stopLbl, _stopAfter, folder, defender, update, _zapretVer })
                 c.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
@@ -165,7 +173,7 @@ namespace Zarp.UI
             Controls.AddRange(new Control[]
             {
                 header, explain, _list, actions, _status, opts, toggles,
-                timeoutLbl, _timeout, stopLbl, _stopAfter, folder, defender, update, _zapretVer, close,
+                timeoutLbl, _timeout, stopLbl, _stopAfter, folder, defender, update, _zapretVer, licenses, close,
             });
 
             LoadOptions();

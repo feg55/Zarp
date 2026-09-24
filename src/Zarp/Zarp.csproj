@@ -25,6 +25,13 @@
     <Warning Text="vendor\zapret2.zip не найден, zapret2 не будет вшит в exe. Запустите tools\fetch-zapret.ps1." />
   </Target>
 
+  <!-- лицензии Zarp и вшитых компонентов: едут внутри exe и распаковываются в %LOCALAPPDATA%\Zarp\licenses -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\LICENSE" LogicalName="licenses/LICENSE.txt" />
+    <EmbeddedResource Include="..\..\THIRD_PARTY_NOTICES.md" LogicalName="licenses/THIRD_PARTY_NOTICES.md" />
+    <EmbeddedResource Include="..\..\licenses\*.txt" LogicalName="licenses/%(Filename)%(Extension)" />
+  </ItemGroup>
+
   <ItemGroup>
     <Reference Include="System.Net.Http" />
     <Reference Include="System.IO.Compression" />

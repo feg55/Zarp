@@ -295,13 +295,27 @@ namespace Zarp.UI
             base.OnFormClosing(e);
         }
 
-        async System.Threading.Tasks.Task ExitApp()
+        System.Threading.Tasks.Task ExitApp() => ExitAsync(handover: false);
+
+        /// <summary>Другая копия Zarp (например, новая версия) попросила уступить ей место.</summary>
+        public System.Threading.Tasks.Task ExitForHandoverAsync() => ExitAsync(handover: true);
+
+        async System.Threading.Tasks.Task ExitAsync(bool handover)
         {
             if (_exiting) return;
             _exiting = true;
             Hide();
             _tray.Visible = false;
-            await _engine.ShutdownAsync();
+            if (handover)
+            {
+                // winws2 и подключение принадлежат этой копии: освобождаем всё, новая копия подключится сама
+                Log.Write("Другая копия Zarp попросила закрыться: освобождаю WARP и winws2.");
+                await _engine.StopForHandoverAsync();
+            }
+            else
+            {
+                await _engine.ShutdownAsync();
+            }
             Application.Exit();
         }
 
