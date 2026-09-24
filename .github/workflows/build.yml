@@ -135,3 +135,5 @@ jobs:
 
             Check that the file was built by GitHub Actions from this repository:
             `gh attestation verify Zarp.exe --repo ${{ github.repository }}`
+
+            [Code signing policy](https://github.com/${{ github.repository }}#code-signing-policy)

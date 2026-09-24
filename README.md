@@ -54,6 +54,29 @@ Get-FileHash .\Zarp.exe                                # compare with the releas
 gh attestation verify .\Zarp.exe --repo feg55/Zarp     # proves the file was built here
 ```
 
+### What Zarp changes on your system
+
+- Runs as administrator. While a strategy is active, `winws2` from zapret2 loads the WinDivert driver and modifies only WARP handshake packets.
+- Changes the tunnel protocol and MASQUE options of your WARP client through `warp-cli` to match the chosen strategy. During a search it also pins a WARP endpoint for each test and resets it to automatic afterwards.
+- Extracts zapret2 and keeps its settings and log in `%LOCALAPPDATA%\Zarp`.
+- Only if you turn them on: a Task Scheduler task named `Zarp` for **Start with Windows**, and a Windows Defender exclusion for the zapret2 folder (Zarp asks first).
+
+### Uninstall
+
+1. In Settings, turn off **Start with Windows** (or run `schtasks /Delete /TN Zarp /F`).
+2. Choose **Exit** in the tray menu, then delete `Zarp.exe` and the `%LOCALAPPDATA%\Zarp` folder.
+3. Restore the WARP defaults: `warp-cli tunnel protocol reset`, `warp-cli tunnel masque-options reset`, `warp-cli tunnel endpoint reset`.
+4. If you added the Defender exclusion, remove it in an administrator PowerShell: `Remove-MpPreference -ExclusionPath "$env:LOCALAPPDATA\Zarp\zapret2"`.
+
+### Privacy
+
+Zarp does not collect, store or send any personal data, and it has no telemetry. It makes only these network requests:
+
+- `https://www.cloudflare.com/cdn-cgi/trace`, while testing or connecting, to check that traffic goes through WARP and to measure latency.
+- `https://github.com/bol-van/zapret2/releases` (the GitHub API as a fallback), to check for and download zapret2 updates. Turn off **Update zapret2 automatically** in Settings to disable this.
+
+WARP itself is a Cloudflare service covered by the [Cloudflare WARP privacy policy](https://www.cloudflare.com/application/privacypolicy/). Requests to GitHub are covered by the [GitHub privacy statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement).
+
 ## How it works
 
 A strategy is a WARP tunnel protocol plus a winws2 profile. During the search Zarp starts winws2 for each strategy, connects WARP via `warp-cli`, waits for `Connected` and checks `cdn-cgi/trace` for `warp=on`. Score is `connect time + 4 × ping`. The fakes are real packets from services that are not blocked (QUIC/TLS for google and vk, STUN), because DPI ignores empty fakes.
@@ -87,6 +110,16 @@ dotnet build tests/Zarp.Tests/Zarp.Tests.csproj -c Release -o build/tests
 ### Translations
 
 All UI strings live in [`src/Zarp/Lang`](src/Zarp/Lang), one `key = value` file per language, with `en.txt` as the reference. To fix a translation, edit the file. To add a language, copy `en.txt` to `<code>.txt`, translate the values and add the code to `L.Languages` in [`L.cs`](src/Zarp/Core/L.cs). The tests check that every language has the same keys and placeholders as English.
+
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org).
+
+- Committers and reviewers: [feg55](https://github.com/feg55)
+- Approvers: [feg55](https://github.com/feg55)
+- Privacy policy: see [Privacy](#privacy)
+
+Only `Zarp.exe` built by GitHub Actions from this repository is signed, and every signing request is approved manually. The bundled zapret2 and WinDivert files are unmodified upstream binaries, listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Signing starts with the first release after the SignPath Foundation application is approved; earlier releases are unsigned.
 
 ## License
 
