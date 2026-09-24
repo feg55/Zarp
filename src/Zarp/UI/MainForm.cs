@@ -69,9 +69,7 @@ namespace Zarp.UI
                 Text = "Cloudflare WARP поверх zapret2", Font = Theme.Font(9f), ForeColor = Theme.TextDim,
                 AutoSize = true, Location = new Point(25, 52),
             };
-            var settings = Theme.FlatButton("⚙", 40);
-            settings.Font = Theme.Font(14f);
-            settings.Height = 40;
+            var settings = new SettingsButton();
             settings.Location = new Point(ClientSize.Width - 62, 20);
             settings.Click += (s, e) => OpenSettings();
             new ToolTip().SetToolTip(settings, "Настройки и выбор стратегии");

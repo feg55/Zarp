@@ -18,7 +18,7 @@ namespace Zarp.UI
         readonly NumberBox _stopAfter = new NumberBox { Minimum = 0, Maximum = 100 };
         readonly ToggleSwitch _autoConnect = new ToggleSwitch("Подключаться при запуске программы");
         readonly ToggleSwitch _autostart = new ToggleSwitch("Запускать вместе с Windows");
-        readonly ComboBox _closeAction = new ComboBox();
+        readonly DarkSelect _closeAction = new DarkSelect("Спрашивать каждый раз", "Скрывать в трей", "Закрывать приложение");
         readonly ToggleSwitch _disconnectOnExit = new ToggleSwitch("Отключать WARP при выходе");
         readonly ToggleSwitch _restrict = new ToggleSwitch("Перехватывать только адреса WARP");
         readonly ToggleSwitch _isolate = new ToggleSwitch("Изолировать тесты (новый эндпоинт на каждый)");
@@ -127,25 +127,9 @@ namespace Zarp.UI
             };
             closeOptions.Controls.Add(new Label
             {
-                Text = "При закрытии:", AutoSize = true, Margin = new Padding(0, 5, 12, 0),
+                Text = "При закрытии:", AutoSize = true, Margin = new Padding(0, 8, 12, 0),
             });
-            _closeAction.DropDownStyle = ComboBoxStyle.DropDownList;
-            _closeAction.FlatStyle = FlatStyle.Flat;
-            _closeAction.BackColor = Theme.Panel;
-            _closeAction.ForeColor = Theme.Text;
-            _closeAction.DrawMode = DrawMode.OwnerDrawFixed;
-            _closeAction.DrawItem += (s, e) =>
-            {
-                using (var background = new SolidBrush((e.State & DrawItemState.Selected) != 0 ? Theme.PanelHover : Theme.Panel))
-                    e.Graphics.FillRectangle(background, e.Bounds);
-                if (e.Index >= 0)
-                    TextRenderer.DrawText(e.Graphics, _closeAction.Items[e.Index].ToString(), e.Font,
-                        e.Bounds, Theme.Text, TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
-                e.DrawFocusRectangle();
-            };
-            _closeAction.Width = 240;
             _closeAction.AccessibleName = "Действие при закрытии окна";
-            _closeAction.Items.AddRange(new object[] { "Спрашивать каждый раз", "Скрывать в трей", "Закрывать приложение" });
             closeOptions.Controls.Add(_closeAction);
             toggles.Controls.AddRange(new Control[] { _autoConnect, _autostart, closeOptions, _disconnectOnExit, _restrict, _isolate, _autoUpdate });
 

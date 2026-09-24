@@ -49,6 +49,7 @@ static class Program
             TestExitDuringPrompt();
             TestShutdownDuringOperation();
             TestSettings();
+            CaptureControls();
             Console.WriteLine("PASS: " + _passed + " checks; WARP/WinDivert were not started.");
             watchdog.Dispose();
             return 0;
@@ -248,19 +249,28 @@ static class Program
             PositionOffscreen(settings);
             settings.Show();
             // Do not pump messages yet: the async autostart query is still pending.
-            var choice = (ComboBox)settings.GetType().GetField("_closeAction", PrivateInstance).GetValue(settings);
-            choice.SelectedIndex = 2;
+            var choice = (Button)settings.GetType().GetField("_closeAction", PrivateInstance).GetValue(settings);
+            void Select(int index) => choice.GetType().GetProperty("SelectedIndex").SetValue(choice, index);
+            Select(2);
             Check(!engine.Config.AskBeforeClose && !engine.Config.MinimizeToTray,
                 "Exit preference must save while the autostart query is pending");
-            choice.SelectedIndex = 1;
+            Select(1);
             Check(!engine.Config.AskBeforeClose && engine.Config.MinimizeToTray, "Settings must support tray by default");
-            choice.SelectedIndex = 0;
+            Select(0);
             Check(engine.Config.AskBeforeClose, "Settings must restore prompting");
             Application.DoEvents();
             Check(choice.Parent.ClientRectangle.Contains(choice.Bounds), "Close dropdown must fit in its row");
             foreach (Control control in choice.Parent.Parent.Controls)
                 Check(choice.Parent.Parent.ClientRectangle.Contains(control.Bounds), "Settings option is clipped: " + control.Text);
             SaveImage(settings, "settings.png");
+            choice.GetType().GetMethod("OnKeyDown", PrivateInstance).Invoke(choice, new object[] { new KeyEventArgs(Keys.Down) });
+            Check(!engine.Config.AskBeforeClose && engine.Config.MinimizeToTray, "Keyboard must change and save the selection");
+            choice.PerformClick();
+            var menu = (ContextMenuStrip)choice.GetType().GetField("_menu", PrivateInstance).GetValue(choice);
+            Check(menu.Visible && menu.Items.Count == 3, "All close options must appear in the dropdown");
+            menu.Items[2].PerformClick();
+            Check(!engine.Config.AskBeforeClose && !engine.Config.MinimizeToTray, "Popup selection must change and save the preference");
+            menu.Close();
         }
     }
 
@@ -283,12 +293,40 @@ static class Program
         }
     }
 
-    static void SaveImage(Form form, string name)
+    static void SaveImage(Control form, string name)
     {
         using (var bitmap = new Bitmap(form.Width, form.Height))
         {
             form.DrawToBitmap(bitmap, new Rectangle(Point.Empty, bitmap.Size));
             bitmap.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, name));
+        }
+    }
+
+    static void CaptureControls()
+    {
+        using (var main = NewMain(NewEngine())) SaveImage(main, "main.png");
+        foreach (float scale in new[] { 1f, 1.5f, 2f })
+        using (var preview = new Form { BackColor = Color.FromArgb(18, 20, 25), ClientSize = new Size((int)(330 * scale), (int)(90 * scale)) })
+        {
+            PositionOffscreen(preview);
+            var gear = (Control)Activator.CreateInstance(AppAssembly.GetType("Zarp.UI.SettingsButton"));
+            gear.Size = new Size((int)(40 * scale), (int)(40 * scale));
+            gear.Location = new Point((int)(12 * scale), (int)(12 * scale));
+            var select = (Button)Activator.CreateInstance(AppAssembly.GetType("Zarp.UI.DarkSelect"),
+                new object[] { new[] { "Спрашивать каждый раз", "Скрывать в трей", "Закрывать приложение" } });
+            select.Font = new Font("Segoe UI", 9f * scale);
+            select.Size = new Size((int)(240 * scale), (int)(32 * scale));
+            select.Location = new Point((int)(66 * scale), (int)(16 * scale));
+            select.GetType().GetProperty("SelectedIndex").SetValue(select, 2);
+            preview.Controls.AddRange(new[] { gear, select });
+            preview.Show();
+            Application.DoEvents();
+            SaveImage(preview, "controls-" + (int)(scale * 100) + ".png");
+            select.PerformClick();
+            var menu = (ContextMenuStrip)select.GetType().GetField("_menu", PrivateInstance).GetValue(select);
+            Application.DoEvents();
+            SaveImage(menu, "dropdown-" + (int)(scale * 100) + ".png");
+            menu.Close();
         }
     }
 

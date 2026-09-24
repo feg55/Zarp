@@ -24,7 +24,7 @@ jobs:
           dotnet-version: 8.0.x
 
       - name: Require release signing configuration
-        if: github.ref_type == 'tag'
+        if: github.ref_type == 'tag' && vars.SIGNPATH_ENABLED == 'true'
         shell: pwsh
         env:
           SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -34,7 +34,7 @@ jobs:
         run: |
           foreach ($name in @('SIGNPATH_API_TOKEN', 'SIGNPATH_ORGANIZATION_ID', 'SIGNPATH_PROJECT_SLUG', 'SIGNPATH_SIGNING_POLICY_SLUG')) {
             if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
-              throw "Missing $name. Configure release signing using docs/code-signing.md before publishing a tag."
+              throw "SIGNPATH_ENABLED is true but $name is missing. Complete docs/code-signing.md or disable SIGNPATH_ENABLED."
             }
           }
 
@@ -72,7 +72,7 @@ jobs:
           }
 
       - name: Upload signing input
-        if: github.ref_type == 'tag'
+        if: github.ref_type == 'tag' && vars.SIGNPATH_ENABLED == 'true'
         id: unsigned
         uses: actions/upload-artifact@v4
         with:
@@ -82,7 +82,7 @@ jobs:
           retention-days: 1
 
       - name: Sign release
-        if: github.ref_type == 'tag'
+        if: github.ref_type == 'tag' && vars.SIGNPATH_ENABLED == 'true'
         uses: signpath/github-action-submit-signing-request@v3
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -94,7 +94,7 @@ jobs:
           output-artifact-directory: signed
 
       - name: Verify and stage signed release
-        if: github.ref_type == 'tag'
+        if: github.ref_type == 'tag' && vars.SIGNPATH_ENABLED == 'true'
         shell: pwsh
         run: |
           ./tools/verify-signature.ps1 -Path signed/Zarp.exe
@@ -129,7 +129,7 @@ jobs:
           files: out/Zarp.exe
           generate_release_notes: true
           body: |
-            This release is Authenticode-signed. Verify the publisher in the file's Digital Signatures tab.
+            ${{ vars.SIGNPATH_ENABLED == 'true' && 'This release is Authenticode-signed. Verify the publisher in the Digital Signatures tab.' || 'This release is unsigned. Windows SmartScreen may show an unknown-publisher warning.' }}
 
             **Zarp.exe SHA-256:** `${{ steps.sha.outputs.hash }}`
 

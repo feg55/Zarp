@@ -72,7 +72,7 @@ See the [zapret2 manual](https://github.com/bol-van/zapret2/blob/master/docs/man
 
 Requires the .NET SDK 6 or later (the target is .NET Framework 4.8). `tools/fetch-zapret.ps1` packs the latest zapret2 release into `vendor/zapret2.zip`, which gets embedded into the exe.
 
-GitHub Actions builds every push. Publishing a `v*` tag requires [SignPath setup](docs/code-signing.md): the workflow signs and verifies the final `Zarp.exe` before publishing it. Missing signing configuration or an invalid signature stops the release.
+GitHub Actions builds every push. A `v*` tag publishes `Zarp.exe`; releases are unsigned until [SignPath is configured](docs/code-signing.md) and the repository variable `SIGNPATH_ENABLED` is set to `true`. Once signing is enabled, a missing configuration or invalid signature stops the release. Release notes report the signing status.
 
 UI regression checks (Windows; no WARP/WinDivert changes):
 
