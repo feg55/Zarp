@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <AssemblyName>Zarp</AssemblyName>
+    <RootNamespace>Zarp</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>zarp.ico</ApplicationIcon>
+    <Version>1.0.0</Version>
+    <Product>Zarp</Product>
+    <Description>Cloudflare WARP over zapret2</Description>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+  <!-- zapret2 вшивается в exe (архив готовит tools\fetch-zapret.ps1). Без него программа скачает zapret2 сама. -->
+  <ItemGroup Condition="Exists('..\..\vendor\zapret2.zip')">
+    <EmbeddedResource Include="..\..\vendor\zapret2.zip" LogicalName="zapret2.zip" />
+  </ItemGroup>
+  <Target Name="WarnNoZapret" BeforeTargets="Build" Condition="!Exists('..\..\vendor\zapret2.zip')">
+    <Warning Text="vendor\zapret2.zip не найден — zapret2 не будет вшит в exe. Запустите tools\fetch-zapret.ps1." />
+  </Target>
+
+  <ItemGroup>
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+    <Reference Include="System.Web.Extensions" />
+  </ItemGroup>
+
+</Project>

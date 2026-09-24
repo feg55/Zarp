@@ -1,0 +1,49 @@
+name: Build
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # для публикации релиза
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Fetch zapret2
+        shell: powershell
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./tools/fetch-zapret.ps1
+
+      - name: Version
+        id: ver
+        shell: pwsh   # pwsh пишет GITHUB_OUTPUT в UTF-8 (Windows PowerShell 5 — в UTF-16)
+        run: |
+          if ('${{ github.ref_type }}' -eq 'tag') { $v = '${{ github.ref_name }}'.TrimStart('v') } else { $v = '0.0.0-dev.${{ github.run_number }}' }
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Build
+        run: dotnet build src/Zarp/Zarp.csproj -c Release -o out "-p:Version=${{ steps.ver.outputs.version }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Zarp
+          path: out/Zarp.exe
+
+      - name: Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/Zarp.exe
+          generate_release_notes: true
