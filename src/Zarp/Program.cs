@@ -20,7 +20,7 @@ namespace Zarp
             {
                 if (!first)
                 {
-                    // уже запущено — просто показать существующее окно
+                    // уже запущено - просто показать существующее окно
                     try { EventWaitHandle.OpenExisting(ShowEventName).Set(); } catch { }
                     return;
                 }
@@ -32,7 +32,7 @@ namespace Zarp
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
 
-                // exe — один файл, лежит где угодно; всё изменяемое (настройки, журнал, zapret2) — в %LOCALAPPDATA%\Zarp
+                // exe - один файл, лежит где угодно; всё изменяемое (настройки, журнал, zapret2) - в %LOCALAPPDATA%\Zarp
                 string exeDir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\');
                 string dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Zarp");
                 Directory.CreateDirectory(dataDir);
@@ -65,7 +65,7 @@ namespace Zarp
             }
         }
 
-        /// <summary>Ранние версии хранили настройки рядом с exe — переносим их в папку данных.</summary>
+        /// <summary>Ранние версии хранили настройки рядом с exe - переносим их в папку данных.</summary>
         static void MigrateFromExeDir(string exeDir, string dataDir)
         {
             foreach (var (from, to) in new[] { ("zarp.json", "zarp.json"), ("zwarp.json", "zarp.json"), ("strategies.txt", "strategies.txt") })

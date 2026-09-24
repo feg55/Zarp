@@ -18,7 +18,7 @@ namespace Zarp.Core
         public string CliPath { get; }
         public bool Installed => CliPath != null;
 
-        // последний выставленный транспорт — чтобы не дёргать настройки WARP без нужды
+        // последний выставленный транспорт - чтобы не дёргать настройки WARP без нужды
         WarpTransport? _transport;
 
         public Warp()
@@ -67,7 +67,7 @@ namespace Zarp.Core
             }
         }
 
-        /// <summary>Проверить, что клиент зарегистрирован; если нет — зарегистрировать.</summary>
+        /// <summary>Проверить, что клиент зарегистрирован; если нет - зарегистрировать.</summary>
         public async Task<bool> EnsureRegisteredAsync()
         {
             var r = await Cli("registration show");
@@ -96,7 +96,7 @@ namespace Zarp.Core
             if (familyChanged) await WaitProtocolAppliedAsync(t, ct);
         }
 
-        // Эндпоинты: WireGuard — 162.159.192-195.x / 2606:4700:d0..d1::, MASQUE — 162.159.197-198.x / 2606:4700:102-103::
+        // Эндпоинты: WireGuard - 162.159.192-195.x / 2606:4700:d0..d1::, MASQUE - 162.159.197-198.x / 2606:4700:102-103::
         static readonly Regex WireGuardEndpoint = new Regex(@"162\.159\.19[2-5]\.|2606:4700:d[01]:", RegexOptions.Compiled);
         static readonly Regex MasqueEndpoint = new Regex(@"162\.159\.19[78]\.|2606:4700:10[23]:", RegexOptions.Compiled);
 
@@ -123,7 +123,7 @@ namespace Zarp.Core
 
         public async Task ConnectAsync() => await Cli("connect");
 
-        /// <summary>Жёстко задать эндпоинт туннеля (IP:порт). null — вернуть автоматический выбор.</summary>
+        /// <summary>Жёстко задать эндпоинт туннеля (IP:порт). null - вернуть автоматический выбор.</summary>
         public async Task<bool> SetEndpointAsync(string endpoint)
         {
             if (endpoint == null && !_endpointOverridden) return true; // не трогаем эндпоинт, заданный пользователем
@@ -146,7 +146,7 @@ namespace Zarp.Core
 
         int _endpointSeq;
 
-        /// <summary>Следующий ещё не использованный эндпоинт для транспорта — чтобы каждый тест шёл по «чистому» соединению.</summary>
+        /// <summary>Следующий ещё не использованный эндпоинт для транспорта - чтобы каждый тест шёл по «чистому» соединению.</summary>
         public string NextEndpoint(WarpTransport t)
         {
             int n = _endpointSeq++;
@@ -186,7 +186,7 @@ namespace Zarp.Core
         {
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12 | (SecurityProtocolType)12288 /* Tls13 */;
             var h = new HttpClient(new HttpClientHandler { UseProxy = false }) { Timeout = TimeSpan.FromSeconds(6) };
-            h.DefaultRequestHeaders.ConnectionClose = true; // каждый замер — новое соединение через туннель
+            h.DefaultRequestHeaders.ConnectionClose = true; // каждый замер - новое соединение через туннель
             h.DefaultRequestHeaders.UserAgent.ParseAdd("Zarp/1.0");
             return h;
         }
@@ -214,7 +214,7 @@ namespace Zarp.Core
                 sw.Stop();
                 bool warp = body.Contains("warp=on") || body.Contains("warp=plus");
                 if (!warp) return -1;
-                if (i > 0) times.Add((int)sw.ElapsedMilliseconds); // первый запрос — прогрев (DNS и т.п.)
+                if (i > 0) times.Add((int)sw.ElapsedMilliseconds); // первый запрос - прогрев (DNS и т.п.)
             }
             if (times.Count == 0) return -1;
             times.Sort();

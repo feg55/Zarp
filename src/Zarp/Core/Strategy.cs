@@ -19,7 +19,7 @@ namespace Zarp.Core
 
     /// <summary>
     /// Стратегия = протокол туннеля WARP + профиль winws2 (zapret2).
-    /// Пустой Args означает «без zapret» — WARP подключается напрямую.
+    /// Пустой Args означает «без zapret» - WARP подключается напрямую.
     /// </summary>
     public sealed class Strategy
     {
@@ -59,12 +59,12 @@ namespace Zarp.Core
     /// <summary>Встроенный набор стратегий + пользовательские из strategies.txt.</summary>
     public static class StrategyCatalog
     {
-        // Стратегии именно под рукопожатие WARP. Все атаки — фейки перед первым пакетом туннеля:
+        // Стратегии именно под рукопожатие WARP. Все атаки - фейки перед первым пакетом туннеля:
         //  * MASQUE/HTTP3: QUIC Initial с SNI consumer-masque.cloudflareclient.com (post-quantum, 2 пакета);
         //  * WireGuard: handshake initiation 148 байт с узнаваемой сигнатурой;
         //  * MASQUE/HTTP2: TLS ClientHello по TCP (фолбэк клиента WARP).
         // Фейк должен выглядеть как разрешённый трафик: реальные пакеты google/vk/STUN,
-        // а не нули — «пустые» фейки DPI отбрасывает (проверено: fake_default_quic не проходит).
+        // а не нули - «пустые» фейки DPI отбрасывает (проверено: fake_default_quic не проходит).
         // Порядок важен: поиск идёт сверху вниз, поэтому наиболее вероятные варианты стоят первыми.
         static readonly Strategy[] BuiltIn =
         {

@@ -74,7 +74,7 @@ namespace Zarp.Core
 
         // ------------------------------------------------------------------ сценарии верхнего уровня
 
-        /// <summary>Главная кнопка: если стратегия уже выбрана — подключиться, иначе найти лучшую и подключиться.</summary>
+        /// <summary>Главная кнопка: если стратегия уже выбрана - подключиться, иначе найти лучшую и подключиться.</summary>
         public Task ConnectAsync() => Run(async ct =>
         {
             if (!await PrepareAsync(ct)) return;
@@ -86,10 +86,10 @@ namespace Zarp.Core
                 var others = ConfirmedStrategies(s);
                 if (others.Count > 0)
                 {
-                    Log.Write($"Сохранённая стратегия «{s.Name}» не сработала — пробую другие проверенные.");
+                    Log.Write($"Сохранённая стратегия «{s.Name}» не сработала, пробую другие проверенные.");
                     if (await ApplyFirstWorkingAsync(others, ct)) return;
                 }
-                Log.Write("Проверенные стратегии не сработали — ищу заново.");
+                Log.Write("Проверенные стратегии не сработали, ищу заново.");
             }
             await SearchAndApplyAsync(null, ct);
         });
@@ -164,12 +164,12 @@ namespace Zarp.Core
             }
             if (tag == null)
             {
-                if (verbose) Log.Write("zapret2 " + Zapret.Version + " — последняя версия.");
+                if (verbose) Log.Write("zapret2 " + Zapret.Version + ": последняя версия.");
                 return;
             }
             Log.Write($"Скачана новая версия zapret2 {tag}.");
 
-            // применяем сразу, если ничего не делаем; иначе — при следующем запуске winws2
+            // применяем сразу, если ничего не делаем; иначе - при следующем запуске winws2
             if (!await _busy.WaitAsync(0))
             {
                 Log.Write("Обновление применится при следующем подключении.");
@@ -180,7 +180,7 @@ namespace Zarp.Core
                 var s = Selected;
                 if (State == EngineState.Connected && s != null && s.UsesZapret && Zapret.Running)
                 {
-                    // Туннель WARP уже установлен, zapret нужен только для рукопожатия —
+                    // Туннель WARP уже установлен, zapret нужен только для рукопожатия -
                     // поэтому winws2 можно перезапустить на новой версии, не разрывая подключение.
                     string err = await Zapret.StartAsync(s, Config.RestrictToWarpIps);
                     if (err != null) Log.Write("После обновления winws2 не запустился: " + err);
@@ -254,7 +254,7 @@ namespace Zarp.Core
             var vpns = NetCheck.ForeignVpnAdapters();
             if (vpns.Count > 0)
             {
-                // трафик WARP уйдёт в чужой туннель, и zapret на него не повлияет — результаты поиска будут недостоверны
+                // трафик WARP уйдёт в чужой туннель, и zapret на него не повлияет - результаты поиска будут недостоверны
                 foreach (var v in vpns)
                     Log.Write("Внимание: активен сторонний VPN, через него уходит трафик WARP: " + v);
                 Log.Write("Выключите другой VPN, иначе WARP может не подключиться, а стратегии будут подобраны неправильно.");
@@ -279,7 +279,7 @@ namespace Zarp.Core
             {
                 try
                 {
-                    // сначала — zapret2, вшитый в exe; скачивание с GitHub — только если exe собран без него
+                    // сначала - zapret2, вшитый в exe; скачивание с GitHub - только если exe собран без него
                     Zapret.ExtractEmbedded();
                     if (!Zapret.Installed)
                         await Zapret.InstallAsync(progress, ct);
@@ -410,7 +410,7 @@ namespace Zarp.Core
             {
                 await StopAllAsync();
                 Log.Write(candidates.Count > 0
-                    ? "Кандидаты не прошли перепроверку — вероятно, они сработали случайно. Попробуйте поиск ещё раз или увеличьте таймаут."
+                    ? "Кандидаты не прошли перепроверку: вероятно, они сработали случайно. Попробуйте поиск ещё раз или увеличьте таймаут."
                     : "Ни одна стратегия не сработала. Попробуйте увеличить таймаут в настройках или добавить свои стратегии в " + StrategyCatalog.CustomFileName);
                 Set(EngineState.Idle, "Рабочая стратегия не найдена");
                 return;
@@ -444,7 +444,7 @@ namespace Zarp.Core
                     return true;
                 }
                 MarkFailed(s);
-                Log.Write($"«{s.Name}» не подключилась — пробую следующую.");
+                Log.Write($"«{s.Name}» не подключилась, пробую следующую.");
             }
             return false;
         }

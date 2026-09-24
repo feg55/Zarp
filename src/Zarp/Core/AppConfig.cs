@@ -18,12 +18,12 @@ namespace Zarp.Core
         /// <summary>Стратегия прошла вторую, независимую проверку (на другом эндпоинте WARP).</summary>
         public bool Confirmed { get; set; }
 
-        /// <summary>Чем меньше, тем лучше. Пинг весит больше: он влияет на всю работу, а подключение — один раз.</summary>
+        /// <summary>Чем меньше, тем лучше. Пинг весит больше: он влияет на всю работу, а подключение - один раз.</summary>
         [ScriptIgnore]
         public int Score => Ok ? ConnectMs + PingMs * 4 : int.MaxValue;
     }
 
-    /// <summary>Настройки приложения. Хранятся в zarp.json рядом с exe.</summary>
+    /// <summary>Настройки приложения. Хранятся в %LOCALAPPDATA%\Zarp\zarp.json.</summary>
     public sealed class AppConfig
     {
         public string SelectedStrategyId { get; set; }
@@ -31,7 +31,7 @@ namespace Zarp.Core
 
         /// <summary>Сколько секунд ждать подключения WARP на одной стратегии.</summary>
         public int TestTimeoutSec { get; set; } = 15;
-        /// <summary>Сколько рабочих стратегий найти, прежде чем остановить поиск (0 — проверить все).</summary>
+        /// <summary>Сколько рабочих стратегий найти, прежде чем остановить поиск (0 - проверить все).</summary>
         public int StopAfterWorking { get; set; } = 3;
         public bool AutoConnectOnStart { get; set; } = false;
         public bool MinimizeToTray { get; set; } = true;
@@ -39,7 +39,7 @@ namespace Zarp.Core
         /// <summary>Перехватывать только трафик на адреса WARP (рекомендуется).</summary>
         public bool RestrictToWarpIps { get; set; } = true;
         /// <summary>
-        /// Каждый тест — на новый эндпоинт WARP (IP:порт). Без этого тест «наследует» состояние DPI
+        /// Каждый тест - на новый эндпоинт WARP (IP:порт). Без этого тест «наследует» состояние DPI
         /// от предыдущего удачного подключения, и нерабочая стратегия выглядит рабочей.
         /// </summary>
         public bool IsolateTests { get; set; } = true;

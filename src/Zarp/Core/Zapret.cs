@@ -15,7 +15,7 @@ using System.Web.Script.Serialization;
 
 namespace Zarp.Core
 {
-    /// <summary>Файлы zapret2 заблокированы антивирусом (обычно Защитником Windows — из-за драйвера WinDivert).</summary>
+    /// <summary>Файлы zapret2 заблокированы антивирусом (обычно Защитником Windows - из-за драйвера WinDivert).</summary>
     public sealed class AntivirusBlockedException : Exception
     {
         public AntivirusBlockedException(string msg, Exception inner) : base(msg, inner) { }
@@ -59,7 +59,7 @@ namespace Zarp.Core
             new[] { "2606:4700:d0::", "2606:4700:df:ffff:ffff:ffff:ffff:ffff" },
         };
 
-        // Первый пакет QUIC v1 (Initial, long header) — сюда входит MASQUE по HTTP/3.
+        // Первый пакет QUIC v1 (Initial, long header) - сюда входит MASQUE по HTTP/3.
         const string QuicInitialFilter =
             "outbound and udp and udp.PayloadLength>=256 and udp.Payload[0]>=0xC0 and udp.Payload[0]<0xD0 and udp.Payload[1]==0 and udp.Payload16[1]==0 and udp.Payload[4]==1";
         // WireGuard handshake initiation.
@@ -111,8 +111,31 @@ namespace Zarp.Core
             }
         }
 
+        const string ReleasesLatestPage = "https://github.com/bol-van/zapret2/releases/latest";
+
         static async Task<(string Tag, string Url)> LatestAsync(HttpClient http, CancellationToken ct)
         {
+            // Основной путь: редирект releases/latest → releases/tag/vX. У GitHub API лимит 60 запросов в час на IP,
+            // а через WARP IP общий с тысячами людей, так что API часто отвечает 403.
+            try
+            {
+                using (var noRedirect = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(30) })
+                {
+                    noRedirect.DefaultRequestHeaders.UserAgent.ParseAdd("Zarp/1.0");
+                    using (var resp = await RetryAsync(() => noRedirect.GetAsync(ReleasesLatestPage, ct), ct))
+                    {
+                        var m = Regex.Match(resp.Headers.Location?.ToString() ?? "", @"/releases/tag/(v[\d.]+)$");
+                        if (m.Success)
+                        {
+                            string t = m.Groups[1].Value;
+                            return (t, $"https://github.com/bol-van/zapret2/releases/download/{t}/zapret2-{t}.zip");
+                        }
+                    }
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception e) { Log.Write("releases/latest недоступен, пробую GitHub API: " + e.Message); }
+
             string json = await RetryAsync(() => http.GetStringAsync(ReleasesApi), ct);
             var rel = (Dictionary<string, object>)new JavaScriptSerializer().DeserializeObject(json);
             string tag = rel["tag_name"] as string;
@@ -123,7 +146,7 @@ namespace Zarp.Core
             return (tag, url);
         }
 
-        /// <summary>Скачать релиз и распаковать нужные для Windows файлы в target. version.txt пишется последним — это признак целостности.</summary>
+        /// <summary>Скачать релиз и распаковать нужные для Windows файлы в target. version.txt пишется последним - это признак целостности.</summary>
         static async Task ExtractReleaseAsync(HttpClient http, string url, string tag, string target, CancellationToken ct)
         {
             // Качаем в память: сам архив на диск не пишем, чтобы антивирус не блокировал его целиком.
@@ -223,13 +246,13 @@ namespace Zarp.Core
                     }
                 }
             }
-            File.WriteAllText(Path.Combine(Dir, "version.txt"), EmbeddedVersion); // последним — признак целостности
+            File.WriteAllText(Path.Combine(Dir, "version.txt"), EmbeddedVersion); // последним - признак целостности
             Log.Write("zapret2 " + EmbeddedVersion + " распакован из программы.");
             return true;
         }
 
         /// <summary>
-        /// Установка с GitHub — запасной путь, если exe собран без вшитого zapret2.
+        /// Установка с GitHub - запасной путь, если exe собран без вшитого zapret2.
         /// </summary>
         public async Task InstallAsync(IProgress<string> progress, CancellationToken ct)
         {
@@ -307,7 +330,7 @@ namespace Zarp.Core
             {
                 if (Directory.Exists(Dir)) Directory.Delete(Dir, true);
                 Directory.Move(OldDir, Dir);
-                Log.Write("Новая версия zapret2 не запустилась — возвращена " + Version + ".");
+                Log.Write("Новая версия zapret2 не запустилась, возвращена " + Version + ".");
                 return true;
             }
             catch (Exception e)
@@ -361,7 +384,7 @@ namespace Zarp.Core
                     a.Add("--wf-raw-part=" + WireGuardInitFilter);
                     break;
                 case WarpTransport.MasqueH2:
-                    // при ограничении по IP можно ловить любые порты — WARP перебирает несколько
+                    // при ограничении по IP можно ловить любые порты - WARP перебирает несколько
                     a.Add("--wf-tcp-out=" + (restrictToWarpIps ? "1-65535" : "443"));
                     break;
             }
@@ -404,7 +427,7 @@ namespace Zarp.Core
         public async Task<string> StartAsync(Strategy s, bool restrictToWarpIps)
         {
             Stop();
-            bool updated = ApplyPendingUpdate(); // winws2 остановлен — самое время подменить файлы
+            bool updated = ApplyPendingUpdate(); // winws2 остановлен - самое время подменить файлы
             if (!s.UsesZapret) return null;
             if (!Installed) return "zapret2 не установлен";
 
@@ -480,7 +503,7 @@ namespace Zarp.Core
                 try { p.Kill(); p.WaitForExit(3000); } catch { }
                 p.Dispose();
             }
-            // cmd-обёртка держит winws2.log открытым — ждём её, иначе следующий запуск не сможет писать в лог
+            // cmd-обёртка держит winws2.log открытым - ждём её, иначе следующий запуск не сможет писать в лог
             if (_shell != null)
             {
                 try { if (!_shell.WaitForExit(3000)) _shell.Kill(); } catch { }

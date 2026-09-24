@@ -1,125 +1,64 @@
-# Zarp — Cloudflare WARP поверх zapret2
+# Zarp
 
-Одна кнопка: Zarp сам подбирает самую быструю стратегию [zapret2](https://github.com/bol-van/zapret2),
-при которой подключается Cloudflare WARP, запоминает её и подключает WARP. Стратегию потом можно сменить в настройках.
+[![Build](https://github.com/feg55/Zarp/actions/workflows/build.yml/badge.svg)](https://github.com/feg55/Zarp/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/feg55/Zarp)](https://github.com/feg55/Zarp/releases/latest)
 
-## Установка
+One-click Cloudflare WARP for networks that block it. Zarp finds a [zapret2](https://github.com/bol-van/zapret2) strategy that gets the WARP handshake through DPI, remembers it and connects.
 
-Скачайте `Zarp.exe` со страницы [Releases](../../releases) и запустите. Это один файл, установка не нужна.
+![Zarp](docs/screenshot.png)
 
-Что нужно:
+## Features
 
-- Windows 10/11 x64 (.NET Framework 4.8 уже встроен в систему)
-- Установленный [Cloudflare WARP](https://one.one.one.one/) (`winget install Cloudflare.Warp`)
-- Права администратора: драйверу WinDivert из zapret они нужны, запрос UAC появится сам
+- **One button.** The first click searches for the fastest working strategy, later clicks connect right away.
+- **Built for WARP.** Strategies target the WARP handshake only: MASQUE over QUIC, WireGuard and the MASQUE HTTP/2 fallback.
+- **Honest testing.** Each test runs against a fresh WARP endpoint and every candidate is verified twice. A strategy that only passed thanks to a previous connection is thrown out.
+- **Self-healing.** If the saved strategy stops working, Zarp tries the other verified ones before searching again.
+- **Zero setup.** A single `Zarp.exe` with zapret2 embedded. zapret2 updates itself in the background.
+- **Low overhead.** Only WARP addresses and handshake packets are intercepted. The tunnel itself never passes through zapret.
 
-zapret2 вшит в `Zarp.exe` и при первом запуске распаковывается в `%LOCALAPPDATA%\Zarp\zapret2`.
-Дальше Zarp обновляет его сам: через минуту после запуска и затем каждые 12 часов он сверяет версию
-с последним релизом zapret2 на GitHub. Новая версия скачивается в фоне, а файлы подменяются, когда winws2
-можно безопасно перезапустить: сразу, если WARP подключён (туннель при этом не рвётся), или при следующем подключении.
-Если новая версия не запустится, вернётся прежняя. Автообновление отключается в настройках.
+## Requirements
 
-> **Защитник Windows** часто считает WinDivert вредоносным (ложное срабатывание, см. мануал zapret).
-> Если он заблокирует файлы, Zarp предложит добавить папку `zapret2` в исключения.
-> То же можно сделать вручную: Настройки → «Исключение Защитника».
+- Windows 10 or 11, x64
+- [Cloudflare WARP](https://one.one.one.one/) (`winget install Cloudflare.Warp`)
+- Administrator rights (needed by the WinDivert driver)
 
-> **Другие VPN** (Happ, sing-box, Clash, v2rayN, AmneziaVPN и т.п.) на время работы Zarp нужно выключить.
-> Иначе трафик WARP уходит в их туннель, zapret на него не действует, и поиск стратегии ничего не находит.
-> Zarp сам находит такие адаптеры и предупреждает о них.
+## Usage
 
-## Как пользоваться
+1. Download `Zarp.exe` from [Releases](https://github.com/feg55/Zarp/releases/latest) and run it.
+2. Press the power button. The first search takes a minute or two.
+3. Done. Change the strategy any time in Settings.
 
-1. Запустите `Zarp.exe` и нажмите большую кнопку.
-2. В первый раз начнётся поиск: Zarp по очереди запускает winws2 с разными стратегиями, подключает WARP
-   и замеряет время подключения и пинг через туннель. Поиск останавливается, когда найдено 3 рабочих
-   варианта (можно изменить). Затем каждый кандидат проверяется второй раз, независимо от первого,
-   и подключается лучший из подтверждённых. Если он не подключится, Zarp возьмёт следующий.
-3. Выбранная стратегия запоминается: в следующий раз кнопка подключает сразу, без поиска.
-   Если она перестала работать, Zarp сначала пробует другие подтверждённые стратегии и только потом ищет заново.
+> [!NOTE]
+> Turn off any other VPN (Happ, v2rayN, Clash, AmneziaVPN, ...). WARP traffic would go through its tunnel instead and no strategy would be found. Zarp warns you when it sees one.
 
-Закрытие окна сворачивает программу в трей. WARP при этом продолжает работать. Полный выход — через меню в трее
-(WARP при выходе отключается, это можно выключить).
+> [!WARNING]
+> Windows Defender may flag WinDivert as a hacktool. This is a known false positive. Zarp offers to add its zapret2 folder to Defender exclusions when that happens.
 
-### Настройки (⚙)
+Command line: `--connect` connects on start, `--autostart` starts minimized to tray (used by the autostart task).
 
-- список всех стратегий с результатами последней проверки: работает или нет, время подключения, пинг;
-- **Использовать** — подключиться с выбранной стратегией и запомнить её (или двойной клик по строке);
-- **Проверить выбранные** — прогнать тест только для выделенных строк;
-- **Найти лучшую заново** — полный поиск;
-- **Свои стратегии...** — открывает `strategies.txt`, куда можно дописать свои варианты;
-- ожидание подключения на одну стратегию, когда останавливать поиск, автоподключение, автозапуск с Windows
-  (через Планировщик задач, чтобы не было запроса UAC), трей.
+## How it works
 
-### Ключи командной строки
+A strategy is a WARP tunnel protocol plus a winws2 profile. During the search Zarp starts winws2 for each strategy, connects WARP via `warp-cli`, waits for `Connected` and checks `cdn-cgi/trace` for `warp=on`. Score is `connect time + 4 × ping`. The fakes are real packets from services that are not blocked (QUIC/TLS for google and vk, STUN), because DPI ignores empty fakes.
 
-| Ключ | Что делает |
-|------|------------|
-| `--connect` | сразу подключиться при запуске (если стратегии ещё нет, найти её) |
-| `--autostart` | запуститься свёрнутым в трей и подключиться с сохранённой стратегией. Этот ключ использует автозапуск |
-
-## Как это устроено
-
-Стратегия состоит из двух частей: протокола туннеля WARP и профиля winws2.
-
-| Протокол | Что обрабатывает zapret | Фильтр WinDivert |
-|----------|-------------------------|------------------|
-| MASQUE / HTTP3 | QUIC Initial (фейки) | только первые пакеты QUIC |
-| WireGuard | handshake initiation (фейки) | только пакет рукопожатия, 148 байт |
-| MASQUE / HTTP2 | TLS ClientHello (фейки, multisplit, seqovl...) | TCP |
-
-- По умолчанию перехватываются только адреса WARP (`162.159.192.0/21`, `162.159.204.0/24`, `188.114.96.0/22`,
-  `2606:4700:100::/40`, `2606:4700:d0::/44`). Остальной трафик компьютера zapret не трогает.
-- Для UDP перехватываются только пакеты рукопожатия, поэтому сам туннель через winws2 не проходит и скорость не падает.
-- Протокол переключается через `warp-cli tunnel protocol set` и `warp-cli tunnel masque-options set`.
-- Проверка стратегии: `warp-cli connect` → статус `Connected` → запросы к
-  `https://www.cloudflare.com/cdn-cgi/trace`, в ответе должно быть `warp=on`.
-  Оценка: `время подключения + 4 × пинг` (пинг — медиана трёх запросов), меньше — лучше.
-- **Изоляция тестов.** DPI (или сам WARP) какое-то время помнит состояние прошлого соединения. Поэтому стратегия,
-  проверенная сразу после удачной, тоже «проходит», хотя сама не работает. Чтобы этого избежать, каждый тест идёт
-  на новый эндпоинт WARP (`warp-cli tunnel endpoint set IP:порт`, после поиска эндпоинт сбрасывается на автоматический),
-  а засчитываются только стратегии, прошедшие две проверки (в настройках «работает ✔✔»).
-- **Стратегии сделаны под WARP**: фейки перед первым пакетом туннеля (QUIC Initial MASQUE, handshake WireGuard,
-  ClientHello MASQUE/HTTP2). В качестве фейка используются реальные пакеты незаблокированных сервисов
-  (QUIC/TLS google и vk, STUN). Пустые фейки DPI отбрасывает, поэтому их в наборе нет.
-
-### Свои стратегии (`strategies.txt`)
+App data lives in `%LOCALAPPDATA%\Zarp`: settings, log, extracted zapret2 and `strategies.txt` for your own strategies:
 
 ```
-# Имя | транспорт (h3 / h2 / wg) | аргументы профиля winws2
-Мой QUIC | h3 | --payload=quic_initial --lua-desync=fake:blob=quic_google:repeats=8
-Мой WG   | wg | --payload=wireguard_initiation --lua-desync=fake:blob=zero64:repeats=12
+# name | transport (h3, h2, wg) | winws2 profile args
+My QUIC | h3 | --payload=quic_initial --lua-desync=fake:blob=quic_google:repeats=8
 ```
 
-Фильтр WinDivert, `--lua-init` и блобы (`quic_google`, `quic_vk`, `tls_google`, `tls_vk`, `stun_fake`, `zero64`) Zarp добавляет сам.
-Синтаксис `--lua-desync` описан в [мануале zapret2](https://github.com/bol-van/zapret2/blob/master/docs/manual.md).
-Аргументы передаются winws2 через файл конфигурации, который разбирается как командная строка shell,
-поэтому символы `<`, `>` и пробелы внутри значения берите в одинарные кавычки.
+See the [zapret2 manual](https://github.com/bol-van/zapret2/blob/master/docs/manual.en.md) for `--lua-desync` syntax.
 
-## Где лежат данные
-
-Всё изменяемое хранится в `%LOCALAPPDATA%\Zarp` (Настройки → «Папка данных»):
-
-| Файл | Назначение |
-|------|------------|
-| `zarp.json` | настройки, выбранная стратегия, результаты проверок |
-| `strategies.txt` | свои стратегии |
-| `zarp.log` | журнал (то же, что во вкладке «Журнал») |
-| `zapret2\` | winws2, WinDivert, lua-скрипты, фейковые пакеты; `zarp.cfg` — текущий конфиг winws2, `winws2.log` — его вывод |
-
-## Сборка
+## Building
 
 ```powershell
-.\build.ps1 [-Version 1.2.3]     # → dist\Zarp.exe
+.\build.ps1 -Version 1.0.0   # dist\Zarp.exe
 ```
 
-`tools\fetch-zapret.ps1` скачивает последний релиз zapret2 и упаковывает нужные файлы в `vendor\zapret2.zip`,
-а проект вшивает этот архив в exe как ресурс. Нужен .NET SDK 6+: проект собирается под .NET Framework 4.8,
-пакет reference assemblies подтягивается из nuget.org.
+Requires the .NET SDK 6 or later (the target is .NET Framework 4.8). `tools/fetch-zapret.ps1` packs the latest zapret2 release into `vendor/zapret2.zip`, which gets embedded into the exe.
 
-### Релизы
+GitHub Actions builds every push. Pushing a `v*` tag publishes `Zarp.exe` to Releases.
 
-Сборку делает GitHub Actions ([.github/workflows/build.yml](.github/workflows/build.yml)):
+## Credits
 
-- каждый push и pull request: сборка, `Zarp.exe` доступен как артефакт запуска;
-- тег `v*` (например, `git tag v1.1.0 && git push --tags`): тот же `Zarp.exe` публикуется в GitHub Release,
-  версия берётся из тега, описание собирается из коммитов.
+[zapret2](https://github.com/bol-van/zapret2) by bol-van (MIT), [WinDivert](https://reqrypt.org/windivert.html), [Cloudflare WARP](https://one.one.one.one/).

@@ -22,7 +22,7 @@
     <EmbeddedResource Include="..\..\vendor\zapret2.zip" LogicalName="zapret2.zip" />
   </ItemGroup>
   <Target Name="WarnNoZapret" BeforeTargets="Build" Condition="!Exists('..\..\vendor\zapret2.zip')">
-    <Warning Text="vendor\zapret2.zip не найден — zapret2 не будет вшит в exe. Запустите tools\fetch-zapret.ps1." />
+    <Warning Text="vendor\zapret2.zip не найден, zapret2 не будет вшит в exe. Запустите tools\fetch-zapret.ps1." />
   </Target>
 
   <ItemGroup>

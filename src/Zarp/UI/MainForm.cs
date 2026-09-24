@@ -201,7 +201,7 @@ namespace Zarp.UI
             else if (st == EngineState.Connected)
                 _hint.Text = "Нажмите, чтобы отключиться";
             else if (_engine.Selected == null)
-                _hint.Text = "Нажмите — Zarp сам найдёт самую быструю стратегию zapret2 и подключит WARP";
+                _hint.Text = "Нажмите, и Zarp сам найдёт самую быструю стратегию zapret2 и подключит WARP";
             else
                 _hint.Text = "Нажмите, чтобы подключиться. Стратегию можно сменить в настройках ⚙";
 
@@ -210,7 +210,7 @@ namespace Zarp.UI
 
             _trayToggle.Text = busy ? "Отменить" : st == EngineState.Connected ? "Отключить" : "Подключить";
             _tray.Icon = st == EngineState.Connected ? _iconOn : busy ? _iconBusy : _iconOff;
-            string trayText = "Zarp — " + _status.Text;
+            string trayText = "Zarp: " + _status.Text;
             _tray.Text = trayText.Length > 63 ? trayText.Substring(0, 63) : trayText;
         }
 
@@ -282,7 +282,7 @@ namespace Zarp.UI
                 {
                     _trayHintShown = true;
                     _tray.ShowBalloonTip(3000, "Zarp работает в фоне",
-                        "Иконка в трее. Для полного выхода — правый клик → Выход.", ToolTipIcon.Info);
+                        "Иконка в трее. Чтобы выйти совсем: правый клик → Выход.", ToolTipIcon.Info);
                 }
                 return;
             }

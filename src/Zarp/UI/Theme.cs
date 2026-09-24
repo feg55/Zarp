@@ -12,9 +12,13 @@ namespace Zarp.UI
         public static readonly Color Panel = Color.FromArgb(27, 30, 37);
         public static readonly Color PanelHover = Color.FromArgb(37, 41, 50);
         public static readonly Color Border = Color.FromArgb(46, 50, 60);
-        // не чисто белый — на тёмном фоне он режет глаз
+        // не чисто белый - на тёмном фоне он режет глаз
         public static readonly Color Text = Color.FromArgb(196, 200, 208);
         public static readonly Color TextDim = Color.FromArgb(128, 134, 146);
+        public static readonly Color TextDisabled = Color.FromArgb(78, 83, 94);
+        public static readonly Color BorderHover = Color.FromArgb(64, 69, 81);
+        public static readonly Color OnAccent = Color.FromArgb(30, 20, 12);      // тёмный текст на оранжевом
+        public static readonly Color OnAccentKnob = Color.FromArgb(250, 246, 242);
         public static readonly Color Accent = Color.FromArgb(244, 129, 32);   // оранжевый Cloudflare
         public static readonly Color Busy = Color.FromArgb(80, 150, 255);
         public static readonly Color Ok = Color.FromArgb(64, 196, 120);
@@ -47,26 +51,9 @@ namespace Zarp.UI
             c.HandleCreated += (s, e) => SetWindowTheme(c.Handle, "DarkMode_Explorer", null);
         }
 
-        /// <summary>Плоская тёмная кнопка.</summary>
-        public static Button FlatButton(string text, int width = 120)
-        {
-            var b = new Button
-            {
-                Text = text,
-                Width = width,
-                Height = 32,
-                FlatStyle = FlatStyle.Flat,
-                BackColor = Panel,
-                ForeColor = Text,
-                Font = Font(9f),
-                Cursor = Cursors.Hand,
-                UseVisualStyleBackColor = false,
-            };
-            b.FlatAppearance.BorderColor = Border;
-            b.FlatAppearance.MouseOverBackColor = PanelHover;
-            b.FlatAppearance.MouseDownBackColor = Border;
-            return b;
-        }
+        /// <summary>Тёмная кнопка (см. DarkButton).</summary>
+        public static DarkButton FlatButton(string text, int width = 120, bool primary = false) =>
+            new DarkButton { Text = text, Width = width, Primary = primary };
 
         public static GraphicsPath RoundRect(RectangleF r, float radius)
         {

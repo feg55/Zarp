@@ -28,7 +28,7 @@ jobs:
 
       - name: Version
         id: ver
-        shell: pwsh   # pwsh пишет GITHUB_OUTPUT в UTF-8 (Windows PowerShell 5 — в UTF-16)
+        shell: pwsh   # pwsh пишет GITHUB_OUTPUT в UTF-8 (Windows PowerShell 5 - в UTF-16)
         run: |
           if ('${{ github.ref_type }}' -eq 'tag') { $v = '${{ github.ref_name }}'.TrimStart('v') } else { $v = '0.0.0-dev.${{ github.run_number }}' }
           "version=$v" >> $env:GITHUB_OUTPUT

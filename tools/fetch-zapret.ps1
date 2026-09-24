@@ -30,8 +30,17 @@ function New-Client {
     $wc
 }
 
-$rel = (New-Client).DownloadString('https://api.github.com/repos/bol-van/zapret2/releases/latest') | ConvertFrom-Json
-$tag = $rel.tag_name
+# The latest tag comes from the releases/latest redirect: unlike the API it has no rate limit
+# (the API allows 60 requests per hour per IP, which a shared VPN/WARP IP exhausts quickly).
+$req = [Net.HttpWebRequest]::Create('https://github.com/bol-van/zapret2/releases/latest')
+$req.AllowAutoRedirect = $false
+$req.UserAgent = 'Zarp-build'
+$resp = $req.GetResponse()
+$location = $resp.Headers['Location']
+$resp.Close()
+if ($location -notmatch '/releases/tag/(v[\d.]+)$') { throw "unexpected releases/latest redirect: $location" }
+$tag = $Matches[1]
+$assetUrl = "https://github.com/bol-van/zapret2/releases/download/$tag/zapret2-$tag.zip"
 
 if (Test-Path $Out) {
     $z = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $Out))
@@ -41,10 +50,8 @@ if (Test-Path $Out) {
     if ($have -eq $tag) { Write-Output "zapret2 $tag already in $Out"; return }
 }
 
-$asset = $rel.assets | Where-Object { $_.name -match '^zapret2-v[\d.]+\.zip$' } | Select-Object -First 1
-if (-not $asset) { throw "zip asset not found in release $tag" }
 Write-Output "Downloading zapret2 $tag ..."
-$bytes = (New-Client).DownloadData($asset.browser_download_url)
+$bytes = (New-Client).DownloadData($assetUrl)
 
 $src = New-Object IO.Compression.ZipArchive((New-Object IO.MemoryStream(, $bytes)), [IO.Compression.ZipArchiveMode]::Read)
 $ms = New-Object IO.MemoryStream
