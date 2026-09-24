@@ -34,8 +34,8 @@ namespace Zarp.Core
                 r = await ProcessUtil.RunAsync("schtasks.exe", $"/Delete /F /TN \"{TaskName}\"", 10000);
             }
             Log.Write(r.Ok
-                ? (enable ? "Автозапуск включён." : "Автозапуск выключен.")
-                : "Не удалось изменить автозапуск: " + r.Output);
+                ? L.T(enable ? "log.autostartOn" : "log.autostartOff")
+                : L.T("log.autostartFailed", r.Output));
             return r.Ok;
         }
 

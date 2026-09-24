@@ -82,7 +82,6 @@ namespace Zarp.UI
         public SettingsButton()
         {
             Size = new Size(40, 40);
-            AccessibleName = "Настройки";
         }
 
         protected override void DrawContent(Graphics g, Color color)
@@ -105,6 +104,75 @@ namespace Zarp.UI
                 float hole = 3f * scale;
                 g.DrawEllipse(pen, cx - hole, cy - hole, hole * 2, hole * 2);
             }
+        }
+    }
+
+    /// <summary>Кнопка выбора языка: глобус рисуется вектором по центру, как и шестерёнка.</summary>
+    sealed class LanguageButton : DarkButton
+    {
+        public LanguageButton()
+        {
+            Size = new Size(40, 40);
+        }
+
+        protected override void DrawContent(Graphics g, Color color)
+        {
+            float scale = Math.Min(Width, Height) / 40f;
+            float cx = (Width - 1) / 2f, cy = (Height - 1) / 2f, r = 9f * scale;
+            using (var pen = new Pen(color, 1.6f * scale))
+            {
+                g.DrawEllipse(pen, cx - r, cy - r, r * 2, r * 2);
+                g.DrawEllipse(pen, cx - r * 0.45f, cy - r, r * 0.9f, r * 2); // меридиан
+                g.DrawLine(pen, cx - r, cy, cx + r, cy);                     // экватор
+                float y = r * 0.52f, half = (float)Math.Sqrt(r * r - y * y);
+                g.DrawLine(pen, cx - half, cy - y, cx + half, cy - y);
+                g.DrawLine(pen, cx - half, cy + y, cx + half, cy + y);
+            }
+        }
+    }
+
+    /// <summary>Тёмное выпадающее меню: список выбора, меню языков и меню в трее.</summary>
+    sealed class DarkMenuRenderer : ToolStripProfessionalRenderer
+    {
+        protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e)
+        {
+            using (var brush = new SolidBrush(Theme.Panel)) e.Graphics.FillRectangle(brush, e.AffectedBounds);
+        }
+
+        protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
+        {
+            using (var pen = new Pen(Theme.BorderHover))
+                e.Graphics.DrawRectangle(pen, 0, 0, e.ToolStrip.Width - 1, e.ToolStrip.Height - 1);
+        }
+
+        protected override void OnRenderImageMargin(ToolStripRenderEventArgs e) { } // без светлой полосы слева
+
+        protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
+        {
+            using (var brush = new SolidBrush(e.Item.Selected && e.Item.Enabled ? Theme.PanelHover : Theme.Panel))
+                e.Graphics.FillRectangle(brush, new Rectangle(Point.Empty, e.Item.Size));
+            if (e.Item is ToolStripMenuItem item && item.Checked)
+                using (var brush = new SolidBrush(Theme.Accent))
+                    e.Graphics.FillRectangle(brush, 0, item.Height / 4, 2, item.Height / 2);
+        }
+
+        protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)
+        {
+            int y = e.Item.Height / 2;
+            using (var pen = new Pen(Theme.Border))
+                e.Graphics.DrawLine(pen, 4, y, e.Item.Width - 4, y);
+        }
+
+        protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
+        {
+            e.TextColor = e.Item.Enabled ? Theme.Text : Theme.TextDisabled;
+            base.OnRenderItemText(e);
+        }
+
+        protected override void OnRenderArrow(ToolStripArrowRenderEventArgs e)
+        {
+            e.ArrowColor = Theme.TextDim;
+            base.OnRenderArrow(e);
         }
     }
 
@@ -138,7 +206,7 @@ namespace Zarp.UI
             Height = 32;
             Margin = Padding.Empty;
             AccessibleRole = AccessibleRole.ComboBox;
-            _menu.Renderer = new SelectMenuRenderer();
+            _menu.Renderer = new DarkMenuRenderer();
             _menu.ShowImageMargin = false;
             _menu.ShowCheckMargin = false;
             _menu.Padding = new Padding(3);
@@ -200,35 +268,6 @@ namespace Zarp.UI
         {
             if (disposing) _menu.Dispose();
             base.Dispose(disposing);
-        }
-
-        sealed class SelectMenuRenderer : ToolStripProfessionalRenderer
-        {
-            protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e)
-            {
-                using (var brush = new SolidBrush(Theme.Panel)) e.Graphics.FillRectangle(brush, e.AffectedBounds);
-            }
-
-            protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
-            {
-                using (var pen = new Pen(Theme.BorderHover))
-                    e.Graphics.DrawRectangle(pen, 0, 0, e.ToolStrip.Width - 1, e.ToolStrip.Height - 1);
-            }
-
-            protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
-            {
-                using (var brush = new SolidBrush(e.Item.Selected ? Theme.PanelHover : Theme.Panel))
-                    e.Graphics.FillRectangle(brush, new Rectangle(Point.Empty, e.Item.Size));
-                if (e.Item is ToolStripMenuItem item && item.Checked)
-                    using (var brush = new SolidBrush(Theme.Accent))
-                        e.Graphics.FillRectangle(brush, 0, item.Height / 4, 2, item.Height / 2);
-            }
-
-            protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
-            {
-                e.TextColor = Theme.Text;
-                base.OnRenderItemText(e);
-            }
         }
     }
 

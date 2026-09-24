@@ -1,0 +1,190 @@
+# Zarp UI strings: English. This is the reference file: every other language must have the same keys.
+# Format: key = value. \n is a line break, {0}, {1}... are placeholders filled in by the app.
+# New language: copy this file to <code>.txt, translate the values and add the code to L.Languages.
+
+# ---- main window
+main.subtitle = Cloudflare WARP over zapret2
+main.settingsTip = Settings and strategy
+main.languageTip = Language
+main.logShow = Log ▾
+main.logHide = Log ▴
+lang.system = System ({0})
+
+status.connected = Connected
+status.searching = Finding a strategy
+status.connecting = Connecting...
+status.preparing = Preparing...
+status.disconnecting = Disconnecting...
+status.disconnected = Disconnected
+
+hint.cancel = Press the button to cancel
+hint.disconnect = Press to disconnect
+hint.firstRun = Press it and Zarp will find the fastest zapret2 strategy and connect WARP
+hint.connect = Press to connect. You can change the strategy in settings ⚙
+
+tray.open = Open
+tray.settings = Settings
+tray.exit = Exit
+tray.cancel = Cancel
+tray.connect = Connect
+tray.disconnect = Disconnect
+tray.bgTitle = Zarp is running in the background
+tray.bgText = It lives in the tray now. To quit: right-click → Exit.
+
+# ---- dialogs
+dlg.antivirus = The antivirus (usually Windows Defender) blocked the zapret2 files.\n\nThis is a known false positive for the WinDivert driver that zapret uses to intercept traffic.\n\nAdd the folder to Windows Defender exclusions and try again?\n\n{0}
+dlg.vpn = Another VPN is on:\n\n{0}\n\nWARP traffic will go through it and zapret won't affect it: WARP may fail to connect and the chosen strategy will be wrong.\n\nIt's better to turn this VPN off. Continue anyway?
+dlg.defender = Add the zapret2 folder to Windows Defender exclusions?\n\n{0}
+dlg.otherCopy = Another copy of Zarp is already running:\n\n{0}\n\nClose it and open this one? If WARP is connected, Zarp will reconnect it.
+dlg.otherCopies = Other copies of Zarp are already running:\n\n{0}\n\nClose them and open this one? If WARP is connected, Zarp will reconnect it.
+dlg.otherCopyFailed = Could not close the other copy of Zarp. Close it from its tray icon and start Zarp again.
+
+close.caption = Closing Zarp
+close.question = What should closing the window do?
+close.trayInfo = In the tray, Zarp keeps running in the background.
+close.exitDisconnects = Exiting disconnects WARP.
+close.exitKeeps = WARP stays connected after exit.
+close.remember = Remember my choice
+close.hint = You can change this in settings.
+close.toTray = Hide to tray
+close.exit = Exit the app
+
+# ---- settings
+settings.caption = Zarp settings
+settings.strategy = Strategy
+settings.explain = Double-click or "Use" switches the strategy. ✔ current, ✔✔ passed two independent checks.
+settings.options = Options
+settings.checking = Checking...
+settings.zapretMissing = not installed
+settings.updatePending = , update applies on connect
+settings.directTip = WARP without zapret
+col.strategy = Strategy
+col.protocol = Protocol
+col.result = Result
+col.connect = Connect, ms
+col.ping = Ping, ms
+btn.use = Use
+btn.testSelected = Test selected
+btn.quickScan = Quick scan
+btn.fullScan = Full scan
+btn.cancel = Cancel
+tip.quickScan = Stops after {0} working strategies (set in Options)
+tip.fullScan = Tests all {0} strategies. Takes longer, but nothing is skipped
+btn.custom = Custom strategies...
+btn.dataFolder = Data folder
+btn.defender = Defender exclusion
+btn.checkUpdates = Check for updates
+btn.licenses = Licenses
+btn.close = Close
+opt.autoConnect = Connect when Zarp starts
+opt.autostart = Start with Windows
+opt.onClose = On close:
+opt.closeAsk = Ask every time
+opt.closeTray = Hide to tray
+opt.closeExit = Exit the app
+opt.closeAccessible = Action when the window is closed
+opt.disconnectOnExit = Disconnect WARP on exit
+opt.restrict = Intercept WARP addresses only
+opt.isolate = Isolate tests (new endpoint for each)
+opt.autoUpdate = Update zapret2 automatically
+opt.timeout = Connection timeout, s
+opt.stopAfter = Quick scan: working\nstrategies to find
+
+result.notTested = not tested
+result.works2 = works ✔✔
+result.works1 = works (1 check)
+result.notConfirmed = not confirmed: {0}
+result.applyFailed = failed to connect when applied
+
+strategy.direct = No zapret (direct connection)
+
+# ---- status line under the button
+detail.disconnecting = Disconnecting...
+detail.disconnected = Disconnected
+detail.noWarp = Cloudflare WARP is not installed
+detail.strategy = Strategy: {0}
+detail.noStrategy = No strategy chosen yet
+detail.warpConnected = WARP is connected
+detail.cancelled = Cancelled
+detail.error = Error: {0}
+detail.preparing = Preparing...
+detail.vpnOff = Turn off the other VPN
+detail.registerFailed = Could not register WARP
+detail.avBlocked = zapret2 is blocked by the antivirus
+detail.downloadFailed = Could not download zapret2
+detail.testing = {0}/{1}: {2}
+detail.rechecking = Re-check {0}/{1}: {2}
+detail.notFound = No working strategy found
+detail.foundButFailed = Strategies found, but connecting failed
+detail.connectingTo = Connecting: {0}
+detail.winwsFailed = winws2 failed to start
+detail.connectFailed = Could not connect
+
+progress.findRelease = Looking for the latest zapret2 release...
+progress.downloading = Downloading zapret2 {0}...
+progress.installed = zapret2 installed.
+
+# ---- strategy test errors (shown in the settings list)
+err.timeout = no connection within {0} s
+err.noTraffic = WARP is connected, but no traffic goes through it
+err.zapretMissing = zapret2 is not installed
+err.winwsStart = Could not start winws2: {0}
+err.winwsExited = winws2 exited: {0}
+err.winwsExitedSilent = winws2 exited without output (WinDivert may be blocked by the antivirus)
+err.avBlockedFile = The antivirus blocked the file {0}
+err.filesMissing = zapret2 files are missing after extraction (the antivirus may have deleted them).
+err.noZipAsset = Release {0} has no zip archive.
+
+# ---- log
+log.started = Zarp started: {0}
+log.exited = Zarp exited
+log.handover = Another copy of Zarp asked this one to close: releasing WARP and winws2.
+log.savedFailed = The saved strategy "{0}" did not work, trying other verified ones.
+log.verifiedFailed = Verified strategies did not work, searching again.
+log.notExtracted = zapret2 is not extracted yet: {0}
+log.updateCheckFailed = Checking for zapret2 updates failed: {0}
+log.upToDate = zapret2 {0} is the latest version.
+log.updateDownloaded = Downloaded zapret2 {0}.
+log.updateOnConnect = The update will be applied on the next connection.
+log.updateRestartFailed = winws2 did not start after the update: {0}
+log.cancelled = Operation cancelled.
+log.error = Error: {0}
+log.noWarpCli = warp-cli.exe not found. Install Cloudflare WARP: https://one.one.one.one/
+log.otherDpi = Warning: another DPI bypass tool is running and may interfere: {0}
+log.otherVpn = Warning: another VPN is active and WARP traffic goes through it: {0}
+log.vpnAdvice = Turn off the other VPN, otherwise WARP may not connect and the strategy will be chosen wrongly.
+log.downloadFailed = Could not download zapret2: {0}
+log.manualInstall = You can extract it manually: put {0} into {1}
+log.searchQuick = Quick scan: {0} strategies, stop after {1} working
+log.searchFull = Full scan: {0} strategies
+log.searchSelected = Testing selected: {0}
+log.testOk = ✔ {0}: connection {1} ms, ping {2} ms
+log.testFail = ✘ {0}: {1}
+log.recheck = Candidates to re-check: {0}
+log.recheckOk = ✔✔ {0}: confirmed (connection {1} ms, ping {2} ms)
+log.candidatesFailed = The candidates failed the re-check, they probably passed by chance. Search again or increase the timeout.
+log.noneWorked = No strategy worked. Increase the timeout in settings or add your own strategies to {0}
+log.best = Best strategy: {0} (connection {1} ms, ping {2} ms)
+log.tryNext = "{0}" did not connect, trying the next one.
+log.connectingWith = Connecting with strategy: {0}
+log.warpNotConnected = WARP did not connect.
+log.warpConnectedIn = WARP connected in {0} ms.
+log.releasesFallback = releases/latest is unavailable, trying the GitHub API: {0}
+log.extracted = zapret2 {0} extracted from the app.
+log.updateApplyFailed = Could not apply the zapret2 update: {0}
+log.updated = zapret2 updated to {0}.
+log.rolledBack = The new zapret2 version did not start, restored {0}.
+log.rollbackFailed = Could not restore the previous zapret2 version: {0}
+log.defenderAdded = Folder added to Defender exclusions: {0}
+log.defenderFailed = Could not add the exclusion: {0}
+log.warpRegistering = WARP is not registered, registering...
+log.warpRegistered = WARP registered.
+log.warpRegisterFailed = WARP registration failed: {0}
+log.customReadFailed = Could not read {0}: {1}
+log.customSkipped = {0}: line skipped (format: Name | h3/h2/wg | args): {1}
+log.autostartOn = Autostart enabled.
+log.autostartOff = Autostart disabled.
+log.autostartFailed = Could not change autostart: {0}
+log.licenseFailed = Could not write license {0}: {1}
+log.configBroken = Settings are corrupted, using defaults: {0}
+log.configSaveFailed = Could not save settings: {0}

@@ -1,0 +1,188 @@
+# Zarp: русский. Ключи совпадают с en.txt.
+
+# ---- главное окно
+main.subtitle = Cloudflare WARP поверх zapret2
+main.settingsTip = Настройки и выбор стратегии
+main.languageTip = Язык
+main.logShow = Журнал ▾
+main.logHide = Журнал ▴
+lang.system = Как в системе ({0})
+
+status.connected = Подключено
+status.searching = Поиск стратегии
+status.connecting = Подключение...
+status.preparing = Подготовка...
+status.disconnecting = Отключение...
+status.disconnected = Отключено
+
+hint.cancel = Нажмите на кнопку, чтобы отменить
+hint.disconnect = Нажмите, чтобы отключиться
+hint.firstRun = Нажмите, и Zarp сам найдёт самую быструю стратегию zapret2 и подключит WARP
+hint.connect = Нажмите, чтобы подключиться. Стратегию можно сменить в настройках ⚙
+
+tray.open = Открыть
+tray.settings = Настройки
+tray.exit = Выход
+tray.cancel = Отменить
+tray.connect = Подключить
+tray.disconnect = Отключить
+tray.bgTitle = Zarp работает в фоне
+tray.bgText = Иконка в трее. Чтобы выйти совсем: правый клик → Выход.
+
+# ---- диалоги
+dlg.antivirus = Антивирус (обычно Защитник Windows) заблокировал файлы zapret2.\n\nЭто известное ложное срабатывание на драйвер WinDivert, которым zapret перехватывает трафик.\n\nДобавить папку в исключения Защитника Windows и повторить?\n\n{0}
+dlg.vpn = Включён другой VPN:\n\n{0}\n\nТрафик WARP пойдёт через него, и zapret на него не повлияет: WARP может не подключиться, а подобранная стратегия будет неверной.\n\nЛучше выключить этот VPN. Всё равно продолжить?
+dlg.defender = Добавить папку zapret2 в исключения Защитника Windows?\n\n{0}
+dlg.otherCopy = Уже запущена другая копия Zarp:\n\n{0}\n\nЗакрыть её и открыть эту? Если WARP подключён, Zarp переподключит его сам.
+dlg.otherCopies = Уже запущены другие копии Zarp:\n\n{0}\n\nЗакрыть их и открыть эту? Если WARP подключён, Zarp переподключит его сам.
+dlg.otherCopyFailed = Не удалось закрыть другую копию Zarp. Закройте её через значок в трее и запустите Zarp снова.
+
+close.caption = Закрытие Zarp
+close.question = Что сделать при закрытии окна?
+close.trayInfo = В трее Zarp продолжит работать в фоне.
+close.exitDisconnects = При выходе WARP будет отключён.
+close.exitKeeps = При выходе WARP останется подключённым.
+close.remember = Запомнить мой выбор
+close.hint = Выбор можно изменить в настройках.
+close.toTray = Скрыть в трей
+close.exit = Закрыть приложение
+
+# ---- настройки
+settings.caption = Настройки Zarp
+settings.strategy = Стратегия
+settings.explain = Двойной клик или «Использовать» включает стратегию. ✔ текущая, ✔✔ прошла две независимые проверки.
+settings.options = Параметры
+settings.checking = Проверяю...
+settings.zapretMissing = не установлен
+settings.updatePending = , обновление применится при подключении
+settings.directTip = WARP без zapret
+col.strategy = Стратегия
+col.protocol = Протокол
+col.result = Результат
+col.connect = Подкл., мс
+col.ping = Пинг, мс
+btn.use = Использовать
+btn.testSelected = Проверить выбранные
+btn.quickScan = Быстрый поиск
+btn.fullScan = Полный поиск
+btn.cancel = Отмена
+tip.quickScan = Останавливается, когда найдено рабочих: {0} (задаётся в параметрах)
+tip.fullScan = Проверяет все стратегии ({0}). Дольше, зато ничего не пропускает
+btn.custom = Свои стратегии...
+btn.dataFolder = Папка данных
+btn.defender = Исключение Защитника
+btn.checkUpdates = Проверить обновления
+btn.licenses = Лицензии
+btn.close = Закрыть
+opt.autoConnect = Подключаться при запуске программы
+opt.autostart = Запускать вместе с Windows
+opt.onClose = При закрытии:
+opt.closeAsk = Спрашивать каждый раз
+opt.closeTray = Скрывать в трей
+opt.closeExit = Закрывать приложение
+opt.closeAccessible = Действие при закрытии окна
+opt.disconnectOnExit = Отключать WARP при выходе
+opt.restrict = Перехватывать только адреса WARP
+opt.isolate = Изолировать тесты (новый эндпоинт на каждый)
+opt.autoUpdate = Обновлять zapret2 автоматически
+opt.timeout = Ожидание подключения, с
+opt.stopAfter = Быстрый поиск: сколько\nрабочих найти
+
+result.notTested = не проверялась
+result.works2 = работает ✔✔
+result.works1 = работает (1 проверка)
+result.notConfirmed = не подтвердилась: {0}
+result.applyFailed = не подключилась при применении
+
+strategy.direct = Без zapret (прямое подключение)
+
+# ---- строка состояния под кнопкой
+detail.disconnecting = Отключаю...
+detail.disconnected = Отключено
+detail.noWarp = Cloudflare WARP не установлен
+detail.strategy = Стратегия: {0}
+detail.noStrategy = Стратегия ещё не выбрана
+detail.warpConnected = WARP подключён
+detail.cancelled = Отменено
+detail.error = Ошибка: {0}
+detail.preparing = Подготовка...
+detail.vpnOff = Выключите сторонний VPN
+detail.registerFailed = Не удалось зарегистрировать WARP
+detail.avBlocked = zapret2 заблокирован антивирусом
+detail.downloadFailed = Не удалось скачать zapret2
+detail.testing = {0}/{1}: {2}
+detail.rechecking = Перепроверка {0}/{1}: {2}
+detail.notFound = Рабочая стратегия не найдена
+detail.foundButFailed = Стратегии нашлись, но подключиться не удалось
+detail.connectingTo = Подключение: {0}
+detail.winwsFailed = Ошибка запуска winws2
+detail.connectFailed = Не удалось подключиться
+
+progress.findRelease = Ищу последний релиз zapret2...
+progress.downloading = Скачиваю zapret2 {0}...
+progress.installed = zapret2 установлен.
+
+# ---- ошибки проверки стратегий
+err.timeout = нет подключения за {0} с
+err.noTraffic = WARP подключён, но трафик через него не идёт
+err.zapretMissing = zapret2 не установлен
+err.winwsStart = Не удалось запустить winws2: {0}
+err.winwsExited = winws2 завершился: {0}
+err.winwsExitedSilent = winws2 завершился без вывода (возможно, WinDivert заблокирован антивирусом)
+err.avBlockedFile = Антивирус заблокировал файл {0}
+err.filesMissing = После распаковки не хватает файлов zapret2 (возможно, их удалил антивирус).
+err.noZipAsset = В релизе {0} не найден zip-архив.
+
+# ---- журнал
+log.started = Zarp запущен: {0}
+log.exited = Zarp завершён
+log.handover = Другая копия Zarp попросила закрыться: освобождаю WARP и winws2.
+log.savedFailed = Сохранённая стратегия «{0}» не сработала, пробую другие проверенные.
+log.verifiedFailed = Проверенные стратегии не сработали, ищу заново.
+log.notExtracted = zapret2 пока не распакован: {0}
+log.updateCheckFailed = Проверка обновлений zapret2 не удалась: {0}
+log.upToDate = zapret2 {0}: последняя версия.
+log.updateDownloaded = Скачана новая версия zapret2 {0}.
+log.updateOnConnect = Обновление применится при следующем подключении.
+log.updateRestartFailed = После обновления winws2 не запустился: {0}
+log.cancelled = Операция отменена.
+log.error = Ошибка: {0}
+log.noWarpCli = Не найден warp-cli.exe. Установите Cloudflare WARP: https://one.one.one.one/
+log.otherDpi = Внимание: запущен другой обходчик DPI, он может мешать: {0}
+log.otherVpn = Внимание: активен сторонний VPN, через него уходит трафик WARP: {0}
+log.vpnAdvice = Выключите другой VPN, иначе WARP может не подключиться, а стратегии будут подобраны неправильно.
+log.downloadFailed = Не удалось скачать zapret2: {0}
+log.manualInstall = Можно распаковать вручную: {0} в {1}
+log.searchQuick = Быстрый поиск: стратегий {0}, остановка после рабочих: {1}
+log.searchFull = Полный поиск: стратегий {0}
+log.searchSelected = Проверка выбранных: {0}
+log.testOk = ✔ {0}: подключение {1} мс, пинг {2} мс
+log.testFail = ✘ {0}: {1}
+log.recheck = Кандидатов на перепроверку: {0}
+log.recheckOk = ✔✔ {0}: подтверждена (подключение {1} мс, пинг {2} мс)
+log.candidatesFailed = Кандидаты не прошли перепроверку: вероятно, они сработали случайно. Попробуйте поиск ещё раз или увеличьте таймаут.
+log.noneWorked = Ни одна стратегия не сработала. Увеличьте таймаут в настройках или добавьте свои стратегии в {0}
+log.best = Лучшая стратегия: {0} (подключение {1} мс, пинг {2} мс)
+log.tryNext = «{0}» не подключилась, пробую следующую.
+log.connectingWith = Подключаюсь со стратегией: {0}
+log.warpNotConnected = WARP не подключился.
+log.warpConnectedIn = WARP подключён за {0} мс.
+log.releasesFallback = releases/latest недоступен, пробую GitHub API: {0}
+log.extracted = zapret2 {0} распакован из программы.
+log.updateApplyFailed = Не удалось применить обновление zapret2: {0}
+log.updated = zapret2 обновлён до {0}.
+log.rolledBack = Новая версия zapret2 не запустилась, возвращена {0}.
+log.rollbackFailed = Не удалось вернуть прежнюю версию zapret2: {0}
+log.defenderAdded = Папка добавлена в исключения Защитника: {0}
+log.defenderFailed = Не удалось добавить исключение: {0}
+log.warpRegistering = WARP не зарегистрирован, регистрирую...
+log.warpRegistered = Регистрация WARP выполнена.
+log.warpRegisterFailed = Ошибка регистрации WARP: {0}
+log.customReadFailed = Не удалось прочитать {0}: {1}
+log.customSkipped = {0}: строка пропущена (формат: Имя | h3/h2/wg | аргументы): {1}
+log.autostartOn = Автозапуск включён.
+log.autostartOff = Автозапуск выключен.
+log.autostartFailed = Не удалось изменить автозапуск: {0}
+log.licenseFailed = Не удалось записать лицензию {0}: {1}
+log.configBroken = Настройки повреждены, используются значения по умолчанию: {0}
+log.configSaveFailed = Не удалось сохранить настройки: {0}

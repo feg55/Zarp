@@ -51,9 +51,24 @@ namespace Zarp.UI
             c.HandleCreated += (s, e) => SetWindowTheme(c.Handle, "DarkMode_Explorer", null);
         }
 
-        /// <summary>Тёмная кнопка (см. DarkButton).</summary>
-        public static DarkButton FlatButton(string text, int width = 120, bool primary = false) =>
-            new DarkButton { Text = text, Width = width, Primary = primary };
+        /// <summary>
+        /// Тёмная кнопка (см. DarkButton). Ширина - не меньше minWidth, но и не меньше текста:
+        /// переводы бывают заметно длиннее русского.
+        /// </summary>
+        public static DarkButton FlatButton(string text, int minWidth = 120, bool primary = false)
+        {
+            var b = new DarkButton { Text = text, Primary = primary };
+            b.Width = Math.Max(minWidth, TextRenderer.MeasureText(text, b.Font).Width + 28);
+            return b;
+        }
+
+        /// <summary>Метка заданной ширины с переносом строк и высотой по тексту.</summary>
+        public static Label WrappedLabel(string text, Font font, Color color, Point at, int width)
+        {
+            var label = new Label { Text = text, Font = font, ForeColor = color, AutoSize = false, Location = at };
+            label.Size = new Size(width, label.GetPreferredSize(new Size(width, 0)).Height);
+            return label;
+        }
 
         public static GraphicsPath RoundRect(RectangleF r, float radius)
         {

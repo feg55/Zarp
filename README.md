@@ -16,6 +16,7 @@ One-click Cloudflare WARP for networks that block it. Zarp finds a [zapret2](htt
 - **Self-healing.** If the saved strategy stops working, Zarp tries the other verified ones before searching again.
 - **Zero setup.** A single `Zarp.exe` with zapret2 embedded. zapret2 updates itself in the background.
 - **Low overhead.** Only WARP addresses and handshake packets are intercepted. The tunnel itself never passes through zapret.
+- **Your language.** English, Русский, Español, Português, 中文, हिन्दी, Français and Deutsch. Zarp follows the Windows language (English if it is not on the list), and the globe button switches it on the fly.
 
 ## Requirements
 
@@ -29,7 +30,9 @@ One-click Cloudflare WARP for networks that block it. Zarp finds a [zapret2](htt
 2. Press the power button. The first search takes a minute or two.
 3. Done. Change the strategy any time in Settings.
 
-Closing the window asks whether to hide Zarp in the tray or quit. Select **Remember my choice** to make that action the default. Settings → **При закрытии** lets you choose **Спрашивать каждый раз**, **Скрывать в трей** or **Закрывать приложение**. **Exit** in the tray menu always quits.
+Settings offer two searches. **Quick scan** (also used by the power button) stops after 3 working strategies; the number is adjustable. **Full scan** tests every strategy: slower, but nothing is skipped, so it finds the fastest one for sure.
+
+Closing the window asks whether to hide Zarp in the tray or quit. Select **Remember my choice** to make that action the default. Settings → **On close** lets you choose **Ask every time**, **Hide to tray** or **Exit the app**. **Exit** in the tray menu always quits.
 
 > [!NOTE]
 > **"Windows protected your PC"?** Older releases and local builds may be unsigned. Release signing requires maintainer setup; see [code signing](docs/code-signing.md). A trusted signature identifies the publisher, but new releases can still trigger SmartScreen while reputation builds. [Verify the download](#verify-the-download) before running it.
@@ -74,12 +77,16 @@ Requires the .NET SDK 6 or later (the target is .NET Framework 4.8). `tools/fetc
 
 GitHub Actions builds every push. A `v*` tag publishes `Zarp.exe`; releases are unsigned until [SignPath is configured](docs/code-signing.md) and the repository variable `SIGNPATH_ENABLED` is set to `true`. Once signing is enabled, a missing configuration or invalid signature stops the release. Release notes report the signing status.
 
-UI regression checks (Windows; no WARP/WinDivert changes):
+UI regression checks (Windows; no WARP/WinDivert changes). They also open every window in every language and fail on clipped or overlapping text:
 
 ```powershell
 dotnet build tests/Zarp.Tests/Zarp.Tests.csproj -c Release -o build/tests
 .\build\tests\Zarp.Tests.exe
 ```
+
+### Translations
+
+All UI strings live in [`src/Zarp/Lang`](src/Zarp/Lang), one `key = value` file per language, with `en.txt` as the reference. To fix a translation, edit the file. To add a language, copy `en.txt` to `<code>.txt`, translate the values and add the code to `L.Languages` in [`L.cs`](src/Zarp/Core/L.cs). The tests check that every language has the same keys and placeholders as English.
 
 ## License
 

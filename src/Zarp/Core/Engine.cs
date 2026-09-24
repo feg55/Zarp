@@ -19,8 +19,9 @@ namespace Zarp.Core
         public List<Strategy> Strategies { get; private set; }
 
         public EngineState State { get; private set; } = EngineState.Idle;
-        /// <summary>Короткий текст для UI: что сейчас происходит.</summary>
-        public string Detail { get; private set; } = "";
+        Msg _detail;
+        /// <summary>Короткий текст для UI: что сейчас происходит. Переводится в момент чтения.</summary>
+        public string Detail => _detail?.ToString() ?? "";
         public int ProgressDone { get; private set; }
         public int ProgressTotal { get; private set; }
 
@@ -59,16 +60,18 @@ namespace Zarp.Core
         public bool IsBusy => State == EngineState.Preparing || State == EngineState.Searching
                               || State == EngineState.Connecting || State == EngineState.Disconnecting;
 
-        void Set(EngineState st, string detail = null)
+        static Msg M(string key, params object[] args) => new Msg(key, args);
+
+        void Set(EngineState st, Msg detail = null)
         {
             State = st;
-            if (detail != null) Detail = detail;
+            if (detail != null) _detail = detail;
             Changed?.Invoke();
         }
 
-        void SetDetail(string detail)
+        void SetDetail(Msg detail)
         {
-            Detail = detail;
+            _detail = detail;
             Changed?.Invoke();
         }
 
@@ -88,19 +91,33 @@ namespace Zarp.Core
                 var others = ConfirmedStrategies(s);
                 if (others.Count > 0)
                 {
-                    Log.Write($"Сохранённая стратегия «{s.Name}» не сработала, пробую другие проверенные.");
+                    Log.Write(L.T("log.savedFailed", s.Name));
                     if (await ApplyFirstWorkingAsync(others, ct)) return;
                 }
-                Log.Write("Проверенные стратегии не сработали, ищу заново.");
+                Log.Write(L.T("log.verifiedFailed"));
             }
-            await SearchAndApplyAsync(null, ct);
+            await SearchAndApplyAsync(Strategies, QuickStopAfter, "log.searchQuick", ct);
         });
 
-        /// <summary>Перебрать стратегии, выбрать самую быструю и подключиться.</summary>
-        public Task SearchAsync(IEnumerable<Strategy> only = null) => Run(async ct =>
+        /// <summary>Быстрый поиск останавливается после стольких рабочих стратегий.</summary>
+        public int QuickStopAfter => Math.Max(1, Config.StopAfterWorking);
+
+        /// <summary>
+        /// Поиск лучшей стратегии и подключение. Быстрый останавливается после QuickStopAfter рабочих,
+        /// полный проверяет все стратегии: дольше, зато ни одна не пропущена.
+        /// </summary>
+        public Task SearchAsync(bool full) => Run(async ct =>
         {
             if (!await PrepareAsync(ct)) return;
-            await SearchAndApplyAsync(only?.ToList(), ct);
+            if (full) await SearchAndApplyAsync(Strategies, 0, "log.searchFull", ct);
+            else await SearchAndApplyAsync(Strategies, QuickStopAfter, "log.searchQuick", ct);
+        });
+
+        /// <summary>Проверить только выбранные в настройках стратегии (все, без остановки).</summary>
+        public Task TestStrategiesAsync(IEnumerable<Strategy> only) => Run(async ct =>
+        {
+            if (!await PrepareAsync(ct)) return;
+            await SearchAndApplyAsync(only.ToList(), 0, "log.searchSelected", ct);
         });
 
         /// <summary>Применить конкретную стратегию (из настроек) и запомнить её.</summary>
@@ -116,9 +133,9 @@ namespace Zarp.Core
 
         public Task DisconnectAsync() => Run(async ct =>
         {
-            Set(EngineState.Disconnecting, "Отключаю...");
+            Set(EngineState.Disconnecting, M("detail.disconnecting"));
             await StopAllAsync();
-            Set(EngineState.Idle, "Отключено");
+            Set(EngineState.Idle, M("detail.disconnected"));
         });
 
         /// <summary>Выяснить текущее состояние при запуске программы.</summary>
@@ -126,13 +143,13 @@ namespace Zarp.Core
         {
             // распаковать вшитый zapret2 заранее, чтобы первое подключение не ждало; ошибки (антивирус) разберёт PrepareAsync
             try { Zapret.ExtractEmbedded(); }
-            catch (Exception e) { Log.Write("zapret2 пока не распакован: " + e.Message); }
-            if (!Warp.Installed) { Set(EngineState.Idle, "Cloudflare WARP не установлен"); return; }
+            catch (Exception e) { Log.Write(L.T("log.notExtracted", e.Message)); }
+            if (!Warp.Installed) { Set(EngineState.Idle, M("detail.noWarp")); return; }
             var (status, _) = await Warp.StatusAsync();
             if (status == "Connected")
                 Set(EngineState.Connected, DescribeSelected());
             else
-                Set(EngineState.Idle, Selected != null ? "Стратегия: " + Selected.Name : "Стратегия ещё не выбрана");
+                Set(EngineState.Idle, Selected != null ? M("detail.strategy", Selected) : M("detail.noStrategy"));
         }
 
         // ------------------------------------------------------------------ фоновое обновление zapret2
@@ -162,21 +179,21 @@ namespace Zarp.Core
             }
             catch (Exception e)
             {
-                Log.Write("Проверка обновлений zapret2 не удалась: " + e.Message);
+                Log.Write(L.T("log.updateCheckFailed", e.Message));
                 return;
             }
             if (tag == null)
             {
-                if (verbose) Log.Write("zapret2 " + Zapret.Version + ": последняя версия.");
+                if (verbose) Log.Write(L.T("log.upToDate", Zapret.Version));
                 return;
             }
-            Log.Write($"Скачана новая версия zapret2 {tag}.");
+            Log.Write(L.T("log.updateDownloaded", tag));
             if (_stopping) return;
 
             // применяем сразу, если ничего не делаем; иначе - при следующем запуске winws2
             if (!await _busy.WaitAsync(0))
             {
-                Log.Write("Обновление применится при следующем подключении.");
+                Log.Write(L.T("log.updateOnConnect"));
                 return;
             }
             try
@@ -187,8 +204,8 @@ namespace Zarp.Core
                 {
                     // Туннель WARP уже установлен, zapret нужен только для рукопожатия -
                     // поэтому winws2 можно перезапустить на новой версии, не разрывая подключение.
-                    string err = await Zapret.StartAsync(s, Config.RestrictToWarpIps);
-                    if (err != null) Log.Write("После обновления winws2 не запустился: " + err);
+                    var err = await Zapret.StartAsync(s, Config.RestrictToWarpIps);
+                    if (err != null) Log.Write(L.T("log.updateRestartFailed", err));
                 }
                 else if (!Zapret.Running)
                 {
@@ -239,14 +256,14 @@ namespace Zarp.Core
             }
             catch (OperationCanceledException)
             {
-                Log.Write("Операция отменена.");
+                Log.Write(L.T("log.cancelled"));
                 await StopAllAsync();
-                Set(EngineState.Idle, "Отменено");
+                Set(EngineState.Idle, M("detail.cancelled"));
             }
             catch (Exception e)
             {
-                Log.Write("Ошибка: " + e.Message);
-                Set(EngineState.Idle, "Ошибка: " + e.Message);
+                Log.Write(L.T("log.error", e.Message));
+                Set(EngineState.Idle, M("detail.error", e.Message));
             }
             finally
             {
@@ -262,11 +279,11 @@ namespace Zarp.Core
 
         async Task<bool> PrepareAsync(CancellationToken ct)
         {
-            Set(EngineState.Preparing, "Подготовка...");
+            Set(EngineState.Preparing, M("detail.preparing"));
             if (!Warp.Installed)
             {
-                Log.Write("Не найден warp-cli.exe. Установите Cloudflare WARP: https://one.one.one.one/");
-                Set(EngineState.Idle, "Cloudflare WARP не установлен");
+                Log.Write(L.T("log.noWarpCli"));
+                Set(EngineState.Idle, M("detail.noWarp"));
                 return false;
             }
             if (!Zapret.Installed || Zapret.EmbeddedIsNewer)
@@ -274,23 +291,23 @@ namespace Zarp.Core
                 if (!await InstallZapretAsync(ct) && !Zapret.Installed) return false;
             }
             foreach (var other in Zapret.ForeignDpiTools())
-                Log.Write("Внимание: запущен другой обходчик DPI, он может мешать: " + other);
+                Log.Write(L.T("log.otherDpi", other));
             var vpns = NetCheck.ForeignVpnAdapters();
             if (vpns.Count > 0)
             {
                 // трафик WARP уйдёт в чужой туннель, и zapret на него не повлияет - результаты поиска будут недостоверны
                 foreach (var v in vpns)
-                    Log.Write("Внимание: активен сторонний VPN, через него уходит трафик WARP: " + v);
-                Log.Write("Выключите другой VPN, иначе WARP может не подключиться, а стратегии будут подобраны неправильно.");
+                    Log.Write(L.T("log.otherVpn", v));
+                Log.Write(L.T("log.vpnAdvice"));
                 if (AskContinueWithVpn != null && !AskContinueWithVpn(vpns))
                 {
-                    Set(EngineState.Idle, "Выключите сторонний VPN");
+                    Set(EngineState.Idle, M("detail.vpnOff"));
                     return false;
                 }
             }
             if (!await Warp.EnsureRegisteredAsync())
             {
-                Set(EngineState.Idle, "Не удалось зарегистрировать WARP");
+                Set(EngineState.Idle, M("detail.registerFailed"));
                 return false;
             }
             return true;
@@ -298,7 +315,7 @@ namespace Zarp.Core
 
         async Task<bool> InstallZapretAsync(CancellationToken ct)
         {
-            var progress = new Progress<string>(m => { Log.Write(m); SetDetail(m); });
+            var progress = new Progress<Msg>(m => { Log.Write(m.ToString()); SetDetail(m); });
             for (int attempt = 0; attempt < 2; attempt++)
             {
                 try
@@ -315,19 +332,19 @@ namespace Zarp.Core
                     bool allow = AskAntivirusExclusion?.Invoke(Zapret.Dir) ?? false;
                     if (!allow || !await Zapret.AddDefenderExclusionAsync())
                     {
-                        Set(EngineState.Idle, "zapret2 заблокирован антивирусом");
+                        Set(EngineState.Idle, M("detail.avBlocked"));
                         return false;
                     }
                 }
                 catch (Exception e) when (!(e is OperationCanceledException))
                 {
-                    Log.Write("Не удалось скачать zapret2: " + e.Message);
-                    Log.Write("Можно распаковать вручную: winws2.exe, cygwin1.dll, WinDivert.dll, WinDivert64.sys, lua\\, files\\fake\\ в " + Zapret.Dir);
-                    Set(EngineState.Idle, "Не удалось скачать zapret2");
+                    Log.Write(L.T("log.downloadFailed", e.Message));
+                    Log.Write(L.T("log.manualInstall", @"winws2.exe, cygwin1.dll, WinDivert.dll, WinDivert64.sys, lua\, files\fake\", Zapret.Dir));
+                    Set(EngineState.Idle, M("detail.downloadFailed"));
                     return false;
                 }
             }
-            Set(EngineState.Idle, "zapret2 заблокирован антивирусом");
+            Set(EngineState.Idle, M("detail.avBlocked"));
             return false;
         }
 
@@ -342,15 +359,15 @@ namespace Zarp.Core
             await Warp.SetTransportAsync(s.Transport, ct);
             if (Config.IsolateTests)
                 await Warp.SetEndpointAsync(Warp.NextEndpoint(s.Transport));
-            string err = await Zapret.StartAsync(s, Config.RestrictToWarpIps);
-            if (err != null) { res.Error = err; return res; }
+            var err = await Zapret.StartAsync(s, Config.RestrictToWarpIps);
+            if (err != null) { res.Fail(err); return res; }
 
             await Warp.ConnectAsync();
             int connectMs = await Warp.WaitConnectedAsync(Config.TestTimeoutSec * 1000, ct);
-            if (connectMs < 0) { res.Error = $"нет подключения за {Config.TestTimeoutSec} с"; return res; }
+            if (connectMs < 0) { res.Fail(M("err.timeout", Config.TestTimeoutSec)); return res; }
 
             int ping = await Warp.MeasureAsync(3, ct);
-            if (ping < 0) { res.Error = "WARP подключён, но трафик через него не идёт"; return res; }
+            if (ping < 0) { res.Fail(M("err.noTraffic")); return res; }
 
             res.Ok = true;
             res.ConnectMs = connectMs;
@@ -358,13 +375,12 @@ namespace Zarp.Core
             return res;
         }
 
-        async Task SearchAndApplyAsync(List<Strategy> only, CancellationToken ct)
+        /// <param name="stopAfter">Остановить перебор после стольких рабочих стратегий; 0 - проверить все.</param>
+        async Task SearchAndApplyAsync(List<Strategy> list, int stopAfter, string logKey, CancellationToken ct)
         {
-            var list = only ?? Strategies;
-            int stopAfter = only != null ? 0 : Config.StopAfterWorking;
             var candidates = new List<(Strategy S, TestResult R)>();
 
-            Log.Write($"Поиск стратегии: {list.Count} вариантов" + (stopAfter > 0 ? $", остановка после {stopAfter} рабочих" : ""));
+            Log.Write(L.T(logKey, list.Count, stopAfter));
             ProgressTotal = list.Count;
             ProgressDone = 0;
 
@@ -374,13 +390,13 @@ namespace Zarp.Core
                 foreach (var s in list)
                 {
                     ct.ThrowIfCancellationRequested();
-                    Set(EngineState.Searching, $"{ProgressDone + 1}/{list.Count}: {s.Name}");
+                    Set(EngineState.Searching, M("detail.testing", ProgressDone + 1, list.Count, s));
                     var r = await TestAsync(s, ct);
                     Config.Results[s.Id] = r;
                     ProgressDone++;
-                    Log.Write(r.Ok
-                        ? $"  ✔ {s.Name}: подключение {r.ConnectMs} мс, пинг {r.PingMs} мс"
-                        : $"  ✘ {s.Name}: {r.Error}");
+                    Log.Write("  " + (r.Ok
+                        ? L.T("log.testOk", s.Name, r.ConnectMs, r.PingMs)
+                        : L.T("log.testFail", s.Name, r.DisplayError)));
                     if (r.Ok)
                     {
                         candidates.Add((s, r));
@@ -393,14 +409,14 @@ namespace Zarp.Core
                 // Отсеивает стратегии, которые «прошли» только благодаря предыдущему удачному подключению.
                 if (candidates.Count > 0)
                 {
-                    Log.Write($"Перепроверка {candidates.Count} кандидатов...");
+                    Log.Write(L.T("log.recheck", candidates.Count));
                     ProgressDone = 0;
                     ProgressTotal = candidates.Count;
                     int k = 0;
                     foreach (var (s, r1) in candidates.OrderBy(c => c.R.Score).ToList())
                     {
                         ct.ThrowIfCancellationRequested();
-                        Set(EngineState.Searching, $"Перепроверка {++k}/{candidates.Count}: {s.Name}");
+                        Set(EngineState.Searching, M("detail.rechecking", ++k, candidates.Count, s));
                         var r2 = await TestAsync(s, ct);
                         ProgressDone++;
                         if (r2.Ok)
@@ -411,13 +427,13 @@ namespace Zarp.Core
                                 ConnectMs = Math.Max(r1.ConnectMs, r2.ConnectMs),
                                 PingMs = (r1.PingMs + r2.PingMs) / 2,
                             };
-                            Log.Write($"  ✔✔ {s.Name}: подтверждена (подключение {r2.ConnectMs} мс, пинг {r2.PingMs} мс)");
+                            Log.Write("  " + L.T("log.recheckOk", s.Name, r2.ConnectMs, r2.PingMs));
                         }
                         else
                         {
-                            r2.Error = "не подтвердилась: " + r2.Error;
+                            r2.Rechecked = true;
                             Config.Results[s.Id] = r2;
-                            Log.Write($"  ✘ {s.Name}: {r2.Error}");
+                            Log.Write("  " + L.T("log.testFail", s.Name, r2.DisplayError));
                         }
                         Config.Save();
                     }
@@ -434,18 +450,18 @@ namespace Zarp.Core
             {
                 await StopAllAsync();
                 Log.Write(candidates.Count > 0
-                    ? "Кандидаты не прошли перепроверку: вероятно, они сработали случайно. Попробуйте поиск ещё раз или увеличьте таймаут."
-                    : "Ни одна стратегия не сработала. Попробуйте увеличить таймаут в настройках или добавить свои стратегии в " + StrategyCatalog.CustomFileName);
-                Set(EngineState.Idle, "Рабочая стратегия не найдена");
+                    ? L.T("log.candidatesFailed")
+                    : L.T("log.noneWorked", StrategyCatalog.CustomFileName));
+                Set(EngineState.Idle, M("detail.notFound"));
                 return;
             }
 
             ProgressTotal = 0;
             var best = confirmed[0];
             var br = Config.Results[best.Id];
-            Log.Write($"Лучшая стратегия: {best.Name} (подключение {br.ConnectMs} мс, пинг {br.PingMs} мс)");
+            Log.Write(L.T("log.best", best.Name, br.ConnectMs, br.PingMs));
             if (!await ApplyFirstWorkingAsync(confirmed, ct))
-                Set(EngineState.Idle, "Стратегии нашлись, но подключиться не удалось");
+                Set(EngineState.Idle, M("detail.foundButFailed"));
         }
 
         /// <summary>Подтверждённые стратегии, лучшие первыми.</summary>
@@ -468,46 +484,45 @@ namespace Zarp.Core
                     return true;
                 }
                 MarkFailed(s);
-                Log.Write($"«{s.Name}» не подключилась, пробую следующую.");
+                Log.Write(L.T("log.tryNext", s.Name));
             }
             return false;
         }
 
         void MarkFailed(Strategy s)
         {
-            Config.Results[s.Id] = new TestResult
-            {
-                StrategyId = s.Id, When = DateTime.Now, Ok = false, Error = "не подключилась при применении",
-            };
+            var failed = new TestResult { StrategyId = s.Id, When = DateTime.Now, Ok = false };
+            failed.Fail(M("result.applyFailed"));
+            Config.Results[s.Id] = failed;
             Config.Save();
         }
 
         /// <summary>Подключиться с заданной стратегией.</summary>
         async Task<bool> ApplyAsync(Strategy s, CancellationToken ct)
         {
-            Set(EngineState.Connecting, "Подключение: " + s.Name);
-            Log.Write("Подключаюсь со стратегией: " + s.Name);
+            Set(EngineState.Connecting, M("detail.connectingTo", s));
+            Log.Write(L.T("log.connectingWith", s.Name));
 
             await Warp.DisconnectAsync();
             await Warp.SetTransportAsync(s.Transport, ct);
-            string err = await Zapret.StartAsync(s, Config.RestrictToWarpIps);
+            var err = await Zapret.StartAsync(s, Config.RestrictToWarpIps);
             if (err != null)
             {
-                Log.Write(err);
-                Set(EngineState.Idle, "Ошибка запуска winws2");
+                Log.Write(err.ToString());
+                Set(EngineState.Idle, M("detail.winwsFailed"));
                 return false;
             }
             await Warp.ConnectAsync();
             int ms = await Warp.WaitConnectedAsync(Math.Max(30, Config.TestTimeoutSec * 2) * 1000, ct);
             if (ms < 0)
             {
-                Log.Write("WARP не подключился.");
+                Log.Write(L.T("log.warpNotConnected"));
                 await StopAllAsync();
-                Set(EngineState.Idle, "Не удалось подключиться");
+                Set(EngineState.Idle, M("detail.connectFailed"));
                 return false;
             }
-            Log.Write($"WARP подключён за {ms} мс.");
-            Set(EngineState.Connected, "Стратегия: " + s.Name);
+            Log.Write(L.T("log.warpConnectedIn", ms));
+            Set(EngineState.Connected, M("detail.strategy", s));
             return true;
         }
 
@@ -517,11 +532,10 @@ namespace Zarp.Core
             Zapret.Stop();
         }
 
-        string DescribeSelected()
+        Msg DescribeSelected()
         {
             var s = Selected;
-            if (s == null) return "WARP подключён";
-            return "Стратегия: " + s.Name;
+            return s == null ? M("detail.warpConnected") : M("detail.strategy", s);
         }
     }
 }

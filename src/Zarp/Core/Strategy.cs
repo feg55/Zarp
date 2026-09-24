@@ -24,12 +24,21 @@ namespace Zarp.Core
     public sealed class Strategy
     {
         public string Id;
-        public string Name;
+        /// <summary>Ключ перевода для имени (у встроенных стратегий, имя которых надо переводить).</summary>
+        public string NameKey;
+        string _name;
+        /// <summary>Имя для показа: переведённое по NameKey или заданное как есть.</summary>
+        public string Name { get => NameKey != null ? L.T(NameKey) : _name; set => _name = value; }
         public WarpTransport Transport;
         public string Args;
         public bool Custom;
 
         public bool UsesZapret => !string.IsNullOrWhiteSpace(Args);
+
+        public Strategy Clone() => new Strategy
+        {
+            Id = Id, NameKey = NameKey, _name = _name, Transport = Transport, Args = Args, Custom = Custom,
+        };
 
         public static string TransportTitle(WarpTransport t)
         {
@@ -66,48 +75,49 @@ namespace Zarp.Core
         // Фейк должен выглядеть как разрешённый трафик: реальные пакеты google/vk/STUN,
         // а не нули - «пустые» фейки DPI отбрасывает (проверено: fake_default_quic не проходит).
         // Порядок важен: поиск идёт сверху вниз, поэтому наиболее вероятные варианты стоят первыми.
+        // Имена технические и одинаковые на всех языках: fake, ttl, badsum - термины zapret из аргументов.
         static readonly Strategy[] BuiltIn =
         {
             // ---------- MASQUE / HTTP3 (протокол по умолчанию в клиенте WARP) ----------
-            S("warp-q-google6",   "WARP QUIC: фейк google ×6",            WarpTransport.MasqueH3,
+            S("warp-q-google6",   "WARP QUIC: fake google ×6",            WarpTransport.MasqueH3,
               "--payload=quic_initial --lua-desync=fake:blob=quic_google:repeats=6"),
-            S("warp-q-google3",   "WARP QUIC: фейк google ×3",            WarpTransport.MasqueH3,
+            S("warp-q-google3",   "WARP QUIC: fake google ×3",            WarpTransport.MasqueH3,
               "--payload=quic_initial --lua-desync=fake:blob=quic_google:repeats=3"),
-            S("warp-q-vk6",       "WARP QUIC: фейк vk ×6",                WarpTransport.MasqueH3,
+            S("warp-q-vk6",       "WARP QUIC: fake vk ×6",                WarpTransport.MasqueH3,
               "--payload=quic_initial --lua-desync=fake:blob=quic_vk:repeats=6"),
-            S("warp-q-google-vk", "WARP QUIC: фейки google + vk",         WarpTransport.MasqueH3,
+            S("warp-q-google-vk", "WARP QUIC: fakes google + vk",         WarpTransport.MasqueH3,
               "--payload=quic_initial --lua-desync=fake:blob=quic_google:repeats=3 --lua-desync=fake:blob=quic_vk:repeats=3"),
-            S("warp-q-google10",  "WARP QUIC: фейк google ×10",           WarpTransport.MasqueH3,
+            S("warp-q-google10",  "WARP QUIC: fake google ×10",           WarpTransport.MasqueH3,
               "--payload=quic_initial --lua-desync=fake:blob=quic_google:repeats=10"),
-            S("warp-q-google-ttl","WARP QUIC: фейк google ttl=4 ×6",      WarpTransport.MasqueH3,
+            S("warp-q-google-ttl","WARP QUIC: fake google ttl=4 ×6",      WarpTransport.MasqueH3,
               "--payload=quic_initial --lua-desync=fake:blob=quic_google:ip_ttl=4:ip6_ttl=4:repeats=6"),
-            S("warp-q-vk-ttl",    "WARP QUIC: фейк vk ttl=4 ×6",          WarpTransport.MasqueH3,
+            S("warp-q-vk-ttl",    "WARP QUIC: fake vk ttl=4 ×6",          WarpTransport.MasqueH3,
               "--payload=quic_initial --lua-desync=fake:blob=quic_vk:ip_ttl=4:ip6_ttl=4:repeats=6"),
-            S("warp-q-google-bad","WARP QUIC: фейк google badsum ×6",     WarpTransport.MasqueH3,
+            S("warp-q-google-bad","WARP QUIC: fake google badsum ×6",     WarpTransport.MasqueH3,
               "--payload=quic_initial --lua-desync=fake:blob=quic_google:badsum:repeats=6"),
 
             // ---------- WireGuard ----------
-            S("warp-wg-google6",  "WARP WireGuard: фейк QUIC google ×6",  WarpTransport.WireGuard,
+            S("warp-wg-google6",  "WARP WireGuard: fake QUIC google ×6",  WarpTransport.WireGuard,
               "--payload=wireguard_initiation --lua-desync=fake:blob=quic_google:repeats=6"),
-            S("warp-wg-stun",     "WARP WireGuard: фейк STUN ×6",         WarpTransport.WireGuard,
+            S("warp-wg-stun",     "WARP WireGuard: fake STUN ×6",         WarpTransport.WireGuard,
               "--payload=wireguard_initiation --lua-desync=fake:blob=stun_fake:repeats=6"),
-            S("warp-wg-vk10",     "WARP WireGuard: фейк QUIC vk ×10",     WarpTransport.WireGuard,
+            S("warp-wg-vk10",     "WARP WireGuard: fake QUIC vk ×10",     WarpTransport.WireGuard,
               "--payload=wireguard_initiation --lua-desync=fake:blob=quic_vk:repeats=10"),
-            S("warp-wg-google-ttl","WARP WireGuard: фейк google ttl=4",   WarpTransport.WireGuard,
+            S("warp-wg-google-ttl","WARP WireGuard: fake google ttl=4",   WarpTransport.WireGuard,
               "--payload=wireguard_initiation --lua-desync=fake:blob=quic_google:ip_ttl=4:ip6_ttl=4:repeats=6"),
 
             // ---------- MASQUE / HTTP2 (TLS по TCP) ----------
-            S("warp-t-google-md5","WARP TLS: фейк google md5 + split",    WarpTransport.MasqueH2,
+            S("warp-t-google-md5","WARP TLS: fake google md5 + split",    WarpTransport.MasqueH2,
               "--payload=tls_client_hello --lua-desync=fake:blob=tls_google:tcp_md5:repeats=6 --lua-desync=multisplit:pos=1,midsld"),
             S("warp-t-seqovl",    "WARP TLS: seqovl google",              WarpTransport.MasqueH2,
               "--payload=tls_client_hello --lua-desync=multisplit:pos=2:seqovl=681:seqovl_pattern=tls_google"),
-            S("warp-t-vk-seq",    "WARP TLS: фейк vk badseq + disorder",  WarpTransport.MasqueH2,
+            S("warp-t-vk-seq",    "WARP TLS: fake vk badseq + disorder",  WarpTransport.MasqueH2,
               "--payload=tls_client_hello --lua-desync=fake:blob=tls_vk:tcp_seq=-3000:repeats=6 --lua-desync=multidisorder:pos=1,midsld"),
             S("warp-t-hostfake",  "WARP TLS: hostfakesplit vk.com",       WarpTransport.MasqueH2,
               "--payload=tls_client_hello --lua-desync=hostfakesplit:host=vk.com:tcp_md5"),
 
             // ---------- Контроль: вдруг WARP в этой сети и так работает ----------
-            S("direct",           "Без zapret (прямое подключение)",     WarpTransport.MasqueH3, ""),
+            new Strategy { Id = "direct", NameKey = "strategy.direct", Transport = WarpTransport.MasqueH3, Args = "" },
         };
 
         static Strategy S(string id, string name, WarpTransport t, string args) =>
@@ -118,7 +128,7 @@ namespace Zarp.Core
         /// <summary>Все стратегии: встроенные + пользовательские.</summary>
         public static List<Strategy> Load(string dataDir)
         {
-            var list = BuiltIn.Select(s => new Strategy { Id = s.Id, Name = s.Name, Transport = s.Transport, Args = s.Args }).ToList();
+            var list = BuiltIn.Select(s => s.Clone()).ToList();
             string path = Path.Combine(dataDir, CustomFileName);
             try
             {
@@ -128,7 +138,7 @@ namespace Zarp.Core
             }
             catch (Exception e)
             {
-                Log.Write("Не удалось прочитать " + CustomFileName + ": " + e.Message);
+                Log.Write(L.T("log.customReadFailed", CustomFileName, e.Message));
             }
             return list;
         }
@@ -143,7 +153,7 @@ namespace Zarp.Core
                 var parts = line.Split(new[] { '|' }, 3);
                 if (parts.Length < 3 || !Strategy.TryParseTransport(parts[1], out var t))
                 {
-                    Log.Write($"{CustomFileName}: строка пропущена (формат: Имя | h3/h2/wg | аргументы): {line}");
+                    Log.Write(L.T("log.customSkipped", CustomFileName, line));
                     continue;
                 }
                 n++;
@@ -158,16 +168,17 @@ namespace Zarp.Core
             }
         }
 
+        // Файл настройки для опытных пользователей: синтаксис технический, поэтому комментарии на английском.
         const string CustomTemplate =
-@"# Свои стратегии Zarp. Одна строка = одна стратегия:
-#   Имя | транспорт | аргументы профиля winws2
-# транспорт: h3 (MASQUE/QUIC), h2 (MASQUE/TLS), wg (WireGuard)
-# Доступные блобы: quic_google, quic_vk, tls_google, tls_vk, stun_fake, zero64, fake_default_quic, fake_default_tls
-# Фильтр WinDivert, lua-init и блобы Zarp добавляет сам.
+@"# Custom Zarp strategies. One line = one strategy:
+#   Name | transport | winws2 profile arguments
+# transport: h3 (MASQUE/QUIC), h2 (MASQUE/TLS), wg (WireGuard)
+# Blobs: quic_google, quic_vk, tls_google, tls_vk, stun_fake, zero64, fake_default_quic, fake_default_tls
+# Zarp adds the WinDivert filter, lua-init and blobs itself.
 #
-# Примеры:
-# Мой QUIC | h3 | --payload=quic_initial --lua-desync=fake:blob=quic_google:repeats=8
-# Мой WG   | wg | --payload=wireguard_initiation --lua-desync=fake:blob=zero64:repeats=12
+# Examples:
+# My QUIC | h3 | --payload=quic_initial --lua-desync=fake:blob=quic_google:repeats=8
+# My WG   | wg | --payload=wireguard_initiation --lua-desync=fake:blob=zero64:repeats=12
 ";
     }
 }

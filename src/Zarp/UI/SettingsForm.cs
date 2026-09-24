@@ -13,23 +13,25 @@ namespace Zarp.UI
         readonly Engine _engine;
         readonly ListView _list = new ListView();
         readonly Label _status = new Label();
-        readonly DarkButton _use, _test, _search, _cancel;
+        readonly DarkButton _use, _test, _quick, _full, _cancel;
+        readonly ToolTip _tips = new ToolTip();
         readonly NumberBox _timeout = new NumberBox { Minimum = 5, Maximum = 60 };
-        readonly NumberBox _stopAfter = new NumberBox { Minimum = 0, Maximum = 100 };
-        readonly ToggleSwitch _autoConnect = new ToggleSwitch("Подключаться при запуске программы");
-        readonly ToggleSwitch _autostart = new ToggleSwitch("Запускать вместе с Windows");
-        readonly DarkSelect _closeAction = new DarkSelect("Спрашивать каждый раз", "Скрывать в трей", "Закрывать приложение");
-        readonly ToggleSwitch _disconnectOnExit = new ToggleSwitch("Отключать WARP при выходе");
-        readonly ToggleSwitch _restrict = new ToggleSwitch("Перехватывать только адреса WARP");
-        readonly ToggleSwitch _isolate = new ToggleSwitch("Изолировать тесты (новый эндпоинт на каждый)");
-        readonly ToggleSwitch _autoUpdate = new ToggleSwitch("Обновлять zapret2 автоматически");
+        // проверить все стратегии теперь можно полным поиском, поэтому здесь минимум - одна рабочая
+        readonly NumberBox _stopAfter = new NumberBox { Minimum = 1, Maximum = 100 };
+        readonly ToggleSwitch _autoConnect = new ToggleSwitch(L.T("opt.autoConnect"));
+        readonly ToggleSwitch _autostart = new ToggleSwitch(L.T("opt.autostart"));
+        readonly DarkSelect _closeAction = new DarkSelect(L.T("opt.closeAsk"), L.T("opt.closeTray"), L.T("opt.closeExit"));
+        readonly ToggleSwitch _disconnectOnExit = new ToggleSwitch(L.T("opt.disconnectOnExit"));
+        readonly ToggleSwitch _restrict = new ToggleSwitch(L.T("opt.restrict"));
+        readonly ToggleSwitch _isolate = new ToggleSwitch(L.T("opt.isolate"));
+        readonly ToggleSwitch _autoUpdate = new ToggleSwitch(L.T("opt.autoUpdate"));
         readonly Label _zapretVer = new Label();
         bool _loading;
 
         public SettingsForm(Engine engine)
         {
             _engine = engine;
-            Text = "Настройки Zarp";
+            Text = L.T("settings.caption");
             AutoScaleMode = AutoScaleMode.Dpi;
             AutoScaleDimensions = new SizeF(96f, 96f);
             FormBorderStyle = FormBorderStyle.Sizable;
@@ -44,15 +46,15 @@ namespace Zarp.UI
             Theme.DarkTitleBar(this);
             Icon = engine.State == EngineState.Connected ? Theme.AppIcon(32, Theme.Accent) : Theme.AppIcon(32, Theme.Off);
 
-            const int L = 20; // левый отступ
-            int W = ClientSize.Width - L * 2;
+            const int Left0 = 20; // левый отступ
+            int W = ClientSize.Width - Left0 * 2;
 
             // ---------------- стратегии
-            var header = Heading("Стратегия", new Point(L - 2, 14));
+            var header = Heading(L.T("settings.strategy"), new Point(Left0 - 2, 14));
             var explain = new Label
             {
-                Text = "Двойной клик или «Использовать» включает стратегию. ✔ текущая, ✔✔ прошла две независимые проверки.",
-                ForeColor = Theme.TextDim, AutoSize = false, Location = new Point(L, 42), Size = new Size(W, 20),
+                Text = L.T("settings.explain"),
+                ForeColor = Theme.TextDim, AutoSize = false, Location = new Point(Left0, 42), Size = new Size(W, 20),
                 AutoEllipsis = true, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
             };
 
@@ -64,13 +66,18 @@ namespace Zarp.UI
             _list.BackColor = Theme.Panel;
             _list.ForeColor = Theme.Text;
             _list.BorderStyle = BorderStyle.None;
+            _list.Font = Font; // явно: ниже по нему меряются заголовки, а унаследует он его только после добавления на форму
             _list.Columns.Add("", 26);
-            _list.Columns.Add("Стратегия", 250);
-            _list.Columns.Add("Протокол", 110);
-            _list.Columns.Add("Результат", 200);
-            _list.Columns.Add("Подкл., мс", 80, HorizontalAlignment.Right);
-            _list.Columns.Add("Пинг, мс", 72, HorizontalAlignment.Right);
-            _list.SetBounds(L, 68, W, 250);
+            _list.Columns.Add(L.T("col.strategy"), 250);
+            _list.Columns.Add(L.T("col.protocol"), 110);
+            _list.Columns.Add(L.T("col.result"), 200);
+            _list.Columns.Add(L.T("col.connect"), 80, HorizontalAlignment.Right);
+            _list.Columns.Add(L.T("col.ping"), 72, HorizontalAlignment.Right);
+            // заголовки на некоторых языках длиннее: колонка не уже своего заголовка
+            foreach (ColumnHeader col in _list.Columns)
+                if (col.Index != 3 && col.Text.Length > 0)
+                    col.Width = Math.Max(col.Width, TextRenderer.MeasureText(col.Text, _list.Font).Width + 16);
+            _list.SetBounds(Left0, 68, W, 250);
             _list.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
             // шапку рисуем сами: системная всегда светлая
             _list.OwnerDraw = true;
@@ -82,80 +89,95 @@ namespace Zarp.UI
             _list.DoubleClick += (s, e) => UseSelected();
             _list.SelectedIndexChanged += (s, e) => UpdateButtons();
 
-            _use = Theme.FlatButton("Использовать", 130, primary: true);
+            _use = Theme.FlatButton(L.T("btn.use"), 110, primary: true);
             _use.Click += (s, e) => UseSelected();
-            _test = Theme.FlatButton("Проверить выбранные", 170);
+            _test = Theme.FlatButton(L.T("btn.testSelected"), 120);
             _test.Click += async (s, e) =>
             {
                 var sel = Selected();
-                if (sel.Length > 0) await _engine.SearchAsync(sel);
+                if (sel.Length > 0) await _engine.TestStrategiesAsync(sel);
             };
-            _search = Theme.FlatButton("Найти лучшую заново", 170);
-            _search.Click += async (s, e) => await _engine.SearchAsync();
-            _cancel = Theme.FlatButton("Отмена", 90);
+            // быстрый поиск останавливается после N рабочих, полный проверяет все стратегии
+            _quick = Theme.FlatButton(L.T("btn.quickScan"), 110);
+            _quick.Click += async (s, e) => await _engine.SearchAsync(full: false);
+            _full = Theme.FlatButton(L.T("btn.fullScan"), 110);
+            _full.Click += async (s, e) => await _engine.SearchAsync(full: true);
+            _tips.SetToolTip(_full, L.T("tip.fullScan", _engine.Strategies.Count));
+            // «Отмена» показывается на месте кнопок поиска, пока идёт поиск: так все кнопки влезают в ряд на любом языке
+            _cancel = Theme.FlatButton(L.T("btn.cancel"), 110);
             _cancel.Click += (s, e) => _engine.Cancel();
-            var custom = Theme.FlatButton("Свои стратегии...", 140);
+            var custom = Theme.FlatButton(L.T("btn.custom"), 120);
             custom.Click += (s, e) => OpenCustomFile();
 
             var actions = new FlowLayoutPanel
             {
                 FlowDirection = FlowDirection.LeftToRight, WrapContents = false,
-                Location = new Point(L, 330), Size = new Size(W, 36),
+                Location = new Point(Left0, 330), Size = new Size(W, 36),
                 Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom,
             };
-            actions.Controls.AddRange(new Control[] { _use, _test, _search, _cancel, custom });
+            actions.Controls.AddRange(new Control[] { _use, _test, _quick, _full, _cancel, custom });
 
             _status.ForeColor = Theme.TextDim;
             _status.AutoEllipsis = true;
-            _status.SetBounds(L, 374, W, 20);
+            _status.SetBounds(Left0, 374, W, 20);
             _status.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
 
             // ---------------- параметры
-            var opts = Heading("Параметры", new Point(L - 2, 408));
+            var opts = Heading(L.T("settings.options"), new Point(Left0 - 2, 408));
             opts.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
+
+            // Правая колонка обычно 314 px, но если подписи кнопок длиннее (как «Исключение Защитника»),
+            // она расширяется влево, чтобы оставаться выровненной по правому краю окна.
+            var folder = Theme.FlatButton(L.T("btn.dataFolder"), 140);
+            var defender = Theme.FlatButton(L.T("btn.defender"), 140);
+            int rightWidth = Math.Max(314, folder.Width + 8 + defender.Width);
+            int extra = rightWidth - (folder.Width + 8 + defender.Width);
+            folder.Width += extra / 2;
+            defender.Width += extra - extra / 2;
+            int R = ClientSize.Width - Left0 - rightWidth;
 
             var toggles = new FlowLayoutPanel
             {
                 FlowDirection = FlowDirection.TopDown, WrapContents = false,
-                Location = new Point(L, 442), Size = new Size(420, 250),
+                Location = new Point(Left0, 442), Size = new Size(R - Left0 - 12, 250),
                 Anchor = AnchorStyles.Left | AnchorStyles.Bottom,
             };
             var closeOptions = new FlowLayoutPanel
             {
                 FlowDirection = FlowDirection.LeftToRight, WrapContents = false,
-                Size = new Size(420, 32), Margin = new Padding(0, 0, 0, 6),
+                Size = new Size(toggles.Width, 32), Margin = new Padding(0, 0, 0, 6),
             };
             closeOptions.Controls.Add(new Label
             {
-                Text = "При закрытии:", AutoSize = true, Margin = new Padding(0, 8, 12, 0),
+                Text = L.T("opt.onClose"), AutoSize = true, Margin = new Padding(0, 8, 12, 0),
             });
-            _closeAction.AccessibleName = "Действие при закрытии окна";
+            _closeAction.AccessibleName = L.T("opt.closeAccessible");
             closeOptions.Controls.Add(_closeAction);
             toggles.Controls.AddRange(new Control[] { _autoConnect, _autostart, closeOptions, _disconnectOnExit, _restrict, _isolate, _autoUpdate });
 
-            const int R = 470; // правая колонка
-            var timeoutLbl = Lbl("Ожидание подключения, с", new Point(R, 446));
-            _timeout.Location = new Point(R + 200, 440);
-            var stopLbl = Lbl("Сколько рабочих найти\n(0 = проверить все)", new Point(R, 486));
-            _stopAfter.Location = new Point(R + 200, 486);
+            // правая колонка: подписи переносятся, поля ввода выровнены по правому краю
+            int numberX = ClientSize.Width - Left0 - _timeout.Width;
+            int labelWidth = numberX - R - 12;
+            var timeoutLbl = Theme.WrappedLabel(L.T("opt.timeout"), Theme.Font(9.5f), Theme.Text, new Point(R, 446), labelWidth);
+            _timeout.Location = new Point(numberX, 440);
+            var stopLbl = Theme.WrappedLabel(L.T("opt.stopAfter"), Theme.Font(9.5f), Theme.Text, new Point(R, 486), labelWidth);
+            _stopAfter.Location = new Point(numberX, 486);
 
-            var folder = Theme.FlatButton("Папка данных", 150);
             folder.Location = new Point(R, 542);
             folder.Click += (s, e) => Process.Start("explorer.exe", "\"" + _engine.DataDir + "\"");
-            var defender = Theme.FlatButton("Исключение Защитника", 160);
-            defender.Location = new Point(R + 158, 542);
+            defender.Location = new Point(folder.Right + 8, 542);
             defender.Click += async (s, e) =>
             {
-                if (MessageBox.Show(this, "Добавить папку zapret2 в исключения Защитника Windows?\n\n" + _engine.Zapret.Dir,
+                if (MessageBox.Show(this, L.T("dlg.defender", _engine.Zapret.Dir),
                         "Zarp", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
                     await _engine.Zapret.AddDefenderExclusionAsync();
             };
-            var update = Theme.FlatButton("Проверить обновления", 318);
+            var update = Theme.FlatButton(L.T("btn.checkUpdates"), rightWidth);
             update.Location = new Point(R, 584);
             update.Click += async (s, e) =>
             {
                 update.Enabled = false;
-                _zapretVer.Text = "Проверяю...";
+                _zapretVer.Text = L.T("settings.checking");
                 await _engine.CheckZapretUpdateAsync(true);
                 ShowZapretVersion();
                 update.Enabled = true;
@@ -165,12 +187,12 @@ namespace Zarp.UI
             _zapretVer.Location = new Point(R + 2, 626);
             ShowZapretVersion();
 
-            var close = Theme.FlatButton("Закрыть", 110);
-            close.Location = new Point(ClientSize.Width - L - 110, ClientSize.Height - 34 - 16);
+            var close = Theme.FlatButton(L.T("btn.close"), 110);
+            close.Location = new Point(ClientSize.Width - Left0 - close.Width, ClientSize.Height - 34 - 16);
             close.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
             close.Click += (s, e) => Close();
-            var licenses = Theme.FlatButton("Лицензии", 110);
-            licenses.Location = new Point(close.Left - 118, close.Top);
+            var licenses = Theme.FlatButton(L.T("btn.licenses"), 110);
+            licenses.Location = new Point(close.Left - 8 - licenses.Width, close.Top);
             licenses.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
             licenses.Click += (s, e) =>
             {
@@ -192,7 +214,7 @@ namespace Zarp.UI
                 c.CheckedChanged += (s, e) => SaveOptions();
             _closeAction.SelectedIndexChanged += (s, e) => SaveOptions();
             _timeout.ValueChanged += (s, e) => SaveOptions();
-            _stopAfter.ValueChanged += (s, e) => SaveOptions();
+            _stopAfter.ValueChanged += (s, e) => { SaveOptions(); ShowQuickTip(); };
             _autostart.CheckedChanged += async (s, e) =>
             {
                 if (_loading) return;
@@ -203,17 +225,15 @@ namespace Zarp.UI
             _engine.Changed += OnEngineChanged;
             FillList();
             FitResultColumn();
+            ShowQuickTip();
             UpdateButtons();
         }
+
+        void ShowQuickTip() => _tips.SetToolTip(_quick, L.T("tip.quickScan", _engine.QuickStopAfter));
 
         static Label Heading(string text, Point at) => new Label
         {
             Text = text, Font = Theme.Font(12f, FontStyle.Bold), ForeColor = Theme.Text, AutoSize = true, Location = at,
-        };
-
-        static Label Lbl(string text, Point at) => new Label
-        {
-            Text = text, AutoSize = true, ForeColor = Theme.Text, Font = Theme.Font(9.5f), Location = at,
         };
 
         void DrawHeader(object sender, DrawListViewColumnHeaderEventArgs e)
@@ -241,8 +261,8 @@ namespace Zarp.UI
 
         void ShowZapretVersion()
         {
-            string v = _engine.Zapret.Version ?? "не установлен";
-            _zapretVer.Text = "zapret2 " + v + (_engine.Zapret.UpdatePending ? ", обновление применится при подключении" : "");
+            string v = _engine.Zapret.Version ?? L.T("settings.zapretMissing");
+            _zapretVer.Text = "zapret2 " + v + (_engine.Zapret.UpdatePending ? L.T("settings.updatePending") : "");
         }
 
         async void LoadOptions()
@@ -297,14 +317,14 @@ namespace Zarp.UI
                     current ? "✔" : "",
                     s.Name,
                     Strategy.TransportTitle(s.Transport),
-                    r == null ? "не проверялась" : r.Ok ? (r.Confirmed ? "работает ✔✔" : "работает (1 проверка)") : r.Error,
+                    r == null ? L.T("result.notTested") : r.Ok ? L.T(r.Confirmed ? "result.works2" : "result.works1") : r.DisplayError,
                     r != null && r.Ok ? r.ConnectMs.ToString() : "",
                     r != null && r.Ok ? r.PingMs.ToString() : "",
                 })
                 {
                     Tag = s,
                     UseItemStyleForSubItems = false,
-                    ToolTipText = s.UsesZapret ? s.Args : "WARP без zapret",
+                    ToolTipText = s.UsesZapret ? s.Args : L.T("settings.directTip"),
                 };
                 if (current) item.SubItems[1].Font = Theme.Font(9f, FontStyle.Bold);
                 item.SubItems[3].ForeColor = r == null ? Theme.TextDim : r.Ok ? (r.Confirmed ? Theme.Ok : Theme.Busy) : Theme.Bad;
@@ -356,8 +376,8 @@ namespace Zarp.UI
             int n = _list.SelectedItems.Count;
             _use.Enabled = !busy && n == 1;
             _test.Enabled = !busy && n > 0;
-            _search.Enabled = !busy;
-            _cancel.Enabled = busy;
+            _quick.Visible = _full.Visible = !busy;
+            _cancel.Visible = busy;
             string prog = _engine.ProgressTotal > 0 ? $" [{_engine.ProgressDone}/{_engine.ProgressTotal}]" : "";
             _status.Text = busy ? "⏳ " + _engine.Detail + prog : _engine.Detail;
         }
@@ -365,6 +385,7 @@ namespace Zarp.UI
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
             _engine.Changed -= OnEngineChanged;
+            _tips.Dispose();
             base.OnFormClosed(e);
         }
     }

@@ -1,5 +1,7 @@
+using System;
 using System.Drawing;
 using System.Windows.Forms;
+using Zarp.Core;
 
 namespace Zarp.UI
 {
@@ -12,7 +14,7 @@ namespace Zarp.UI
 
         public CloseActionForm(bool minimizeToTray, bool disconnectOnExit)
         {
-            Text = "Закрытие Zarp";
+            Text = L.T("close.caption");
             AutoScaleMode = AutoScaleMode.Dpi;
             AutoScaleDimensions = new SizeF(96f, 96f);
             FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -23,38 +25,33 @@ namespace Zarp.UI
             BackColor = Theme.Back;
             ForeColor = Theme.Text;
             Font = Theme.Font(9.5f);
-            ClientSize = new Size(440, 224);
             Theme.DarkTitleBar(this);
 
-            var title = new Label
-            {
-                Text = "Что сделать при закрытии окна?",
-                Font = Theme.Font(12f, FontStyle.Bold),
-                AutoSize = true, Location = new Point(20, 18),
-            };
-            var description = new Label
-            {
-                Text = "В трее Zarp продолжит работать в фоне.\n" +
-                    (disconnectOnExit ? "При выходе WARP будет отключён." : "При выходе WARP останется подключённым."),
-                ForeColor = Theme.TextDim, Location = new Point(20, 54), Size = new Size(400, 46),
-            };
-            _remember.Text = "Запомнить мой выбор";
-            _remember.AutoSize = true;
-            _remember.Location = new Point(20, 108);
-            var hint = new Label
-            {
-                Text = "Выбор можно изменить в настройках.",
-                ForeColor = Theme.TextDim, AutoSize = true, Location = new Point(20, 138),
-            };
-
-            var tray = Theme.FlatButton("Скрыть в трей", 184, primary: minimizeToTray);
-            tray.Location = new Point(20, 174);
+            const int Pad = 20;
+            // Имена кнопок не зависят от языка: по ним их находят тесты и средства доступности.
+            var tray = Theme.FlatButton(L.T("close.toTray"), 184, primary: minimizeToTray);
+            tray.Name = "tray";
             tray.Click += (s, e) => SelectAction(true);
-            var exit = Theme.FlatButton("Закрыть приложение", 208, primary: !minimizeToTray);
-            exit.Location = new Point(212, 174);
+            var exit = Theme.FlatButton(L.T("close.exit"), 208, primary: !minimizeToTray);
+            exit.Name = "exit";
             exit.Click += (s, e) => SelectAction(false);
             AcceptButton = minimizeToTray ? tray : exit;
 
+            // Ширина по кнопкам, высота по тексту: переводы бывают длиннее русского.
+            int width = Math.Max(400, tray.Width + 8 + exit.Width);
+            var title = Theme.WrappedLabel(L.T("close.question"), Theme.Font(12f, FontStyle.Bold), Theme.Text, new Point(Pad, 18), width);
+            var description = Theme.WrappedLabel(
+                L.T("close.trayInfo") + "\n" + L.T(disconnectOnExit ? "close.exitDisconnects" : "close.exitKeeps"),
+                Font, Theme.TextDim, new Point(Pad, title.Bottom + 10), width);
+            _remember.Text = L.T("close.remember");
+            _remember.Font = Font;
+            _remember.Location = new Point(Pad, description.Bottom + 10);
+            _remember.Size = _remember.GetPreferredSize(Size.Empty);
+            var hint = Theme.WrappedLabel(L.T("close.hint"), Font, Theme.TextDim, new Point(Pad, _remember.Bottom + 8), width);
+            tray.Location = new Point(Pad, hint.Bottom + 16);
+            exit.Location = new Point(Pad + width - exit.Width, tray.Top);
+
+            ClientSize = new Size(width + Pad * 2, tray.Bottom + 18);
             Controls.AddRange(new Control[] { title, description, _remember, hint, tray, exit });
         }
 

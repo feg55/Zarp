@@ -32,6 +32,11 @@
     <EmbeddedResource Include="..\..\licenses\*.txt" LogicalName="licenses/%(Filename)%(Extension)" />
   </ItemGroup>
 
+  <!-- переводы интерфейса: Lang\<код>.txt → ресурс lang/<код>.txt -->
+  <ItemGroup>
+    <EmbeddedResource Include="Lang\*.txt" LogicalName="lang/%(Filename)%(Extension)" />
+  </ItemGroup>
+
   <ItemGroup>
     <Reference Include="System.Net.Http" />
     <Reference Include="System.IO.Compression" />

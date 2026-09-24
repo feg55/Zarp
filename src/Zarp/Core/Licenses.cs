@@ -32,7 +32,7 @@ namespace Zarp.Core
                 }
                 catch (Exception e)
                 {
-                    Log.Write("Не удалось записать лицензию " + name + ": " + e.Message);
+                    Log.Write(L.T("log.licenseFailed", name, e.Message));
                 }
             }
             return dir;

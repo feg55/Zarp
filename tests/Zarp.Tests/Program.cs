@@ -1,10 +1,13 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -27,9 +30,9 @@ static class Program
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
         var watchdog = new System.Threading.Timer(_ =>
         {
-            Console.Error.WriteLine("FAIL: UI checks did not finish within 30 seconds.");
+            Console.Error.WriteLine("FAIL: UI checks did not finish within 60 seconds.");
             Environment.Exit(1);
-        }, null, 30000, System.Threading.Timeout.Infinite);
+        }, null, 60000, System.Threading.Timeout.Infinite);
 
         // Isolate UI tests from embedded driver extraction, WARP, and background downloads.
         typeof(Zapret).GetField("_embeddedVersion", BindingFlags.NonPublic | BindingFlags.Static).SetValue(null, "");
@@ -49,6 +52,8 @@ static class Program
             TestExitDuringPrompt();
             TestShutdownDuringOperation();
             TestSettings();
+            TestLocalization();
+            TestKeysUsedInCode();
             CaptureControls();
             Console.WriteLine("PASS: " + _passed + " checks; WARP/WinDivert were not started.");
             watchdog.Dispose();
@@ -190,7 +195,7 @@ static class Program
                         "Repeated close must not open another dialog");
                     prompt.Controls.OfType<CheckBox>().Single().Checked = remember;
                     if (cancel) prompt.Close();
-                    else prompt.Controls.OfType<Button>().Single(b => b.Text == (tray ? "Скрыть в трей" : "Закрыть приложение")).PerformClick();
+                    else prompt.Controls.OfType<Button>().Single(b => b.Name == (tray ? "tray" : "exit")).PerformClick();
                 }
                 catch (Exception ex)
                 {
@@ -272,6 +277,222 @@ static class Program
             Check(!engine.Config.AskBeforeClose && !engine.Config.MinimizeToTray, "Popup selection must change and save the preference");
             menu.Close();
         }
+    }
+
+    static readonly string[] ExpectedLanguages = { "en", "ru", "es", "pt", "zh", "hi", "fr", "de" };
+
+    static string Placeholders(string text) =>
+        string.Join(",", Regex.Matches(text ?? "", @"\{\d+\}").Cast<Match>().Select(m => m.Value).Distinct().OrderBy(v => v));
+
+    static void TestLocalization()
+    {
+        var codes = L.Languages.Select(l => l.Code).ToArray();
+        Check(codes.SequenceEqual(ExpectedLanguages), "All eight languages must be offered in the menu order");
+        var english = new HashSet<string>(L.KeysOf("en"));
+        Check(english.Count > 100, "English strings must load from the embedded resource");
+        foreach (var code in codes)
+        {
+            var keys = new HashSet<string>(L.KeysOf(code));
+            var missing = english.Except(keys).ToList();
+            var extra = keys.Except(english).ToList();
+            Check(missing.Count == 0 && extra.Count == 0,
+                code + ": missing [" + string.Join(", ", missing) + "], extra [" + string.Join(", ", extra) + "]");
+            foreach (var key in english)
+                Check(Placeholders(L.Raw("en", key)) == Placeholders(L.Raw(code, key)), code + "." + key + ": placeholders differ from English");
+        }
+
+        // язык Windows: региональные варианты сводятся к языку, неподдерживаемый - к английскому
+        foreach (var pair in new[] { ("pt-BR", "pt"), ("pt-PT", "pt"), ("zh-CN", "zh"), ("hi-IN", "hi"), ("de-AT", "de"),
+                                     ("fr-CA", "fr"), ("es-MX", "es"), ("ru-RU", "ru"), ("en-GB", "en"), ("ja-JP", "en"), ("uk-UA", "en") })
+            Check(L.Map(new CultureInfo(pair.Item1)) == pair.Item2, pair.Item1 + " must map to " + pair.Item2);
+        Check(L.Map(CultureInfo.InvariantCulture) == "en", "Invariant culture must fall back to English");
+        Check(L.Resolve(null) == L.SystemLanguage && L.Resolve("") == L.SystemLanguage && L.Resolve("xx") == L.SystemLanguage,
+            "Empty or unknown setting must follow the system language");
+        Check(L.Resolve("hi") == "hi", "Explicit choice must win over the system language");
+
+        // выбор языка переживает перезапуск и читается до создания окон
+        string path = Path.Combine(_data, "language.json");
+        var config = AppConfig.Load(path);
+        Check(config.Language == null && AppConfig.ReadLanguage(path) == null, "New installs must follow the system language");
+        config.Language = "zh";
+        config.Save();
+        Check(AppConfig.ReadLanguage(path) == "zh" && AppConfig.Load(path).Language == "zh", "Chosen language must survive restart");
+        File.WriteAllText(path, "{broken");
+        Check(AppConfig.ReadLanguage(path) == null, "Broken settings must not stop the app from starting");
+
+        try
+        {
+            // сохранённые результаты проверок показываются на текущем языке
+            var result = new TestResult { StrategyId = "x" };
+            result.Fail(new Msg("err.timeout", 15));
+            string resultsPath = Path.Combine(_data, "results.json");
+            var withResult = AppConfig.Load(resultsPath);
+            withResult.Results["x"] = result;
+            withResult.Save();
+            var restored = AppConfig.Load(resultsPath).Results["x"];
+            L.Apply("ru");
+            Check(restored.DisplayError == "нет подключения за 15 с", "Saved error must be shown in Russian: " + restored.DisplayError);
+            restored.Rechecked = true;
+            Check(restored.DisplayError == "не подтвердилась: нет подключения за 15 с", "Re-check failure must be prefixed");
+            L.Apply("de");
+            Check(restored.DisplayError == "nicht bestätigt: keine Verbindung innerhalb von 15 s", "Saved error must follow the language");
+            var direct = StrategyCatalog.Load(NewEngine().DataDir).Single(s => s.Id == "direct");
+            Check(direct.Name == "Ohne zapret (direkte Verbindung)", "Built-in strategy name must be translated");
+
+            foreach (var code in codes)
+            {
+                L.Apply(code);
+                Check(L.Current == code, code + ": language must switch");
+                var engine = NewEngine();
+                using (var settings = NewForm("SettingsForm", engine))
+                {
+                    PositionOffscreen(settings);
+                    settings.Show();
+                    Application.DoEvents();
+                    CheckScanButtons(settings, busy: false, code);
+                    CheckLayout(settings, code);
+                    Control ByText(string key) => settings.Controls.Cast<Control>().Single(c => c.Text == L.T(key));
+                    int edge = ByText("btn.close").Right;
+                    Check(ByText("btn.defender").Right == edge && ByText("btn.checkUpdates").Right == edge,
+                        code + ": right column buttons must line up with Close");
+                    SaveImage(settings, "settings-" + code + ".png");
+
+                    // во время поиска «Отмена» встаёт на место кнопок поиска - ряд тоже должен влезать
+                    var state = typeof(Engine).GetProperty("State");
+                    var update = settings.GetType().GetMethod("UpdateButtons", PrivateInstance);
+                    state.SetValue(engine, EngineState.Searching);
+                    update.Invoke(settings, null);
+                    Application.DoEvents();
+                    CheckScanButtons(settings, busy: true, code);
+                    CheckLayout(settings, code + " (searching)");
+                    state.SetValue(engine, EngineState.Idle);
+                    update.Invoke(settings, null);
+                }
+                using (var main = NewMain(engine))
+                {
+                    CheckLayout(main, code);
+                    SaveImage(main, "main-" + code + ".png");
+                }
+                foreach (bool tray in new[] { true, false })
+                using (var prompt = NewForm("CloseActionForm", tray, tray))
+                {
+                    PositionOffscreen(prompt);
+                    prompt.Show();
+                    Application.DoEvents();
+                    CheckLayout(prompt, code);
+                    if (tray) SaveImage(prompt, "close-" + code + ".png");
+                }
+            }
+
+            // открытое окно меняет язык сразу, без перезапуска
+            L.Apply("en");
+            using (var main = NewMain(NewEngine()))
+            {
+                var status = (Label)main.GetType().GetField("_status", PrivateInstance).GetValue(main);
+                var sub = (Label)main.GetType().GetField("_sub", PrivateInstance).GetValue(main);
+                Check(status.Text == "Disconnected", "English status expected before switching");
+                L.Apply("fr");
+                Check(status.Text == "Déconnecté" && sub.Text == "Cloudflare WARP via zapret2", "Open window must switch language immediately");
+            }
+
+            // меню языков: «как в системе» + все языки под собственными названиями; выбор сразу применяется и сохраняется
+            L.Apply("en");
+            var menuEngine = NewEngine();
+            using (var main = NewMain(menuEngine))
+            {
+                var show = main.GetType().GetMethod("ShowLanguageMenu", PrivateInstance);
+                var menu = (ContextMenuStrip)main.GetType().GetField("_languageMenu", PrivateInstance).GetValue(main);
+                show.Invoke(main, null);
+                Application.DoEvents();
+                var items = menu.Items.OfType<ToolStripMenuItem>().ToList();
+                Check(menu.Visible && items.Count == 1 + L.Languages.Count, "Language menu must list the system option and every language");
+                Check(items[0].Checked && items.Skip(1).Select(i => i.Text).SequenceEqual(L.Languages.Select(l => l.NativeName)),
+                    "Languages must be listed by their own names, system option checked by default");
+                SaveImage(menu, "language-menu.png");
+                items.Single(i => i.Text == "Deutsch").PerformClick();
+                string saved = Path.Combine(menuEngine.DataDir, "zarp.json");
+                Check(L.Current == "de" && menuEngine.Config.Language == "de" && AppConfig.ReadLanguage(saved) == "de",
+                    "Choosing a language must apply and save it");
+                if (menu.Visible) menu.Close();
+                show.Invoke(main, null);
+                items = menu.Items.OfType<ToolStripMenuItem>().ToList();
+                Check(items.Single(i => i.Checked).Text == "Deutsch", "The chosen language must be marked in the menu");
+                items[0].PerformClick();
+                Check(menuEngine.Config.Language == null && AppConfig.ReadLanguage(saved) == null && L.Current == L.SystemLanguage,
+                    "The system option must follow Windows again");
+                if (menu.Visible) menu.Close();
+            }
+        }
+        finally
+        {
+            L.Apply("en");
+        }
+    }
+
+    static void CheckScanButtons(Form settings, bool busy, string code)
+    {
+        Control Field(string name) => (Control)settings.GetType().GetField(name, PrivateInstance).GetValue(settings);
+        var quick = Field("_quick");
+        var full = Field("_full");
+        var cancel = Field("_cancel");
+        Check(quick.Visible == !busy && full.Visible == !busy && cancel.Visible == busy,
+            code + ": quick/full scan must show when idle and give way to Cancel while searching");
+        Check(quick.Text == L.T("btn.quickScan") && full.Text == L.T("btn.fullScan"), code + ": scan buttons must be translated");
+    }
+
+    /// <summary>Ничего не обрезано, текст влезает в кнопки и метки, соседние элементы не налезают друг на друга.</summary>
+    static void CheckLayout(Control parent, string code)
+    {
+        var visible = parent.Controls.Cast<Control>().Where(c => c.Visible).ToList();
+        foreach (var c in visible)
+        {
+            string name = code + ": " + c.GetType().Name + " \"" + c.Text + "\"";
+            Check(parent.ClientRectangle.Contains(c.Bounds), name + " is clipped by " + parent.GetType().Name);
+            if (c is Button button && button.Text.Length > 0)
+            {
+                // DarkSelect рисует текст левее стрелки, остальные кнопки - по центру с полями
+                int room = button.GetType().Name == "DarkSelect"
+                    ? button.Width - button.Height - Math.Max(10, button.Height / 3)
+                    : button.Width - 12;
+                Check(TextRenderer.MeasureText(button.Text, button.Font).Width <= room, name + " does not fit the button");
+            }
+            else if (c is Label label && !label.AutoSize && label.Text.Length > 0)
+            {
+                var need = TextRenderer.MeasureText(label.Text, label.Font, new Size(label.Width, int.MaxValue), TextFormatFlags.WordBreak);
+                Check(need.Height <= label.Height + 2, name + " does not fit the label");
+            }
+            else if (c is ListView list)
+            {
+                foreach (ColumnHeader column in list.Columns)
+                    if (column.Text.Length > 0)
+                        Check(TextRenderer.MeasureText(column.Text, list.Font).Width + 12 <= column.Width,
+                            code + ": column \"" + column.Text + "\" is too narrow");
+            }
+            if (c is Panel) CheckLayout(c, code); // FlowLayoutPanel тоже Panel
+        }
+        for (int i = 0; i < visible.Count; i++)
+            for (int j = i + 1; j < visible.Count; j++)
+                Check(!visible[i].Bounds.IntersectsWith(visible[j].Bounds),
+                    code + ": \"" + visible[i].Text + "\" overlaps \"" + visible[j].Text + "\"");
+    }
+
+    /// <summary>Каждый ключ из кода есть в переводах, и в переводах нет забытых ключей.</summary>
+    static void TestKeysUsedInCode()
+    {
+        string src = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "src", "Zarp"));
+        if (!Directory.Exists(src))
+        {
+            Console.WriteLine("SKIP: sources not found at " + src + ", key usage was not checked");
+            return;
+        }
+        var pattern = new Regex("\"((?:main|lang|status|hint|tray|dlg|close|settings|col|btn|tip|opt|result|strategy|detail|progress|err|log)\\.[A-Za-z0-9]+)\"");
+        var used = new HashSet<string>(Directory.GetFiles(src, "*.cs", SearchOption.AllDirectories)
+            .SelectMany(f => pattern.Matches(File.ReadAllText(f)).Cast<Match>().Select(m => m.Groups[1].Value)));
+        var defined = new HashSet<string>(L.KeysOf("en"));
+        var missing = used.Except(defined).ToList();
+        var unused = defined.Except(used).ToList();
+        Check(missing.Count == 0, "Keys used in code but missing in en.txt: " + string.Join(", ", missing));
+        Check(unused.Count == 0, "Keys in en.txt that the code never uses: " + string.Join(", ", unused));
     }
 
     static void TestExitDuringPrompt()

@@ -134,7 +134,7 @@ namespace Zarp.Core
                 }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-            catch (Exception e) { Log.Write("releases/latest недоступен, пробую GitHub API: " + e.Message); }
+            catch (Exception e) { Log.Write(L.T("log.releasesFallback", e.Message)); }
 
             string json = await RetryAsync(() => http.GetStringAsync(ReleasesApi), ct);
             var rel = (Dictionary<string, object>)new JavaScriptSerializer().DeserializeObject(json);
@@ -142,7 +142,7 @@ namespace Zarp.Core
             string url = ((object[])rel["assets"]).Cast<Dictionary<string, object>>()
                 .Select(a => a["browser_download_url"] as string)
                 .FirstOrDefault(u => u != null && Regex.IsMatch(u, @"/zapret2-v[\d.]+\.zip$"));
-            if (url == null) throw new Exception("В релизе " + tag + " не найден zip-архив.");
+            if (url == null) throw new Exception(L.T("err.noZipAsset", tag));
             return (tag, url);
         }
 
@@ -168,7 +168,7 @@ namespace Zarp.Core
                     }
                     catch (IOException ex) when (IsAntivirusError(ex))
                     {
-                        throw new AntivirusBlockedException("Антивирус заблокировал файл " + rel, ex);
+                        throw new AntivirusBlockedException(L.T("err.avBlockedFile", rel), ex);
                     }
                 }
             }
@@ -242,30 +242,30 @@ namespace Zarp.Core
                     }
                     catch (IOException ex) when (IsAntivirusError(ex))
                     {
-                        throw new AntivirusBlockedException("Антивирус заблокировал файл " + e.FullName, ex);
+                        throw new AntivirusBlockedException(L.T("err.avBlockedFile", e.FullName), ex);
                     }
                 }
             }
             File.WriteAllText(Path.Combine(Dir, "version.txt"), EmbeddedVersion); // последним - признак целостности
-            Log.Write("zapret2 " + EmbeddedVersion + " распакован из программы.");
+            Log.Write(L.T("log.extracted", EmbeddedVersion));
             return true;
         }
 
         /// <summary>
         /// Установка с GitHub - запасной путь, если exe собран без вшитого zapret2.
         /// </summary>
-        public async Task InstallAsync(IProgress<string> progress, CancellationToken ct)
+        public async Task InstallAsync(IProgress<Msg> progress, CancellationToken ct)
         {
             if (ApplyPendingUpdate()) return; // вдруг обновление уже скачано
             using (var http = NewHttp())
             {
-                progress?.Report("Ищу последний релиз zapret2...");
+                progress?.Report(new Msg("progress.findRelease"));
                 var (tag, url) = await LatestAsync(http, ct);
-                progress?.Report("Скачиваю zapret2 " + tag + "...");
+                progress?.Report(new Msg("progress.downloading", tag));
                 await ExtractReleaseAsync(http, url, tag, Dir, ct);
             }
-            if (!Installed) throw new Exception("После распаковки не хватает файлов zapret2 (возможно, их удалил антивирус).");
-            progress?.Report("zapret2 установлен.");
+            if (!Installed) throw new Exception(L.T("err.filesMissing"));
+            progress?.Report(new Msg("progress.installed"));
         }
 
         /// <summary>
@@ -314,11 +314,11 @@ namespace Zarp.Core
             {
                 // откат, чтобы не остаться без zapret2
                 try { if (!Directory.Exists(Dir) && Directory.Exists(OldDir)) Directory.Move(OldDir, Dir); } catch { }
-                Log.Write("Не удалось применить обновление zapret2: " + e.Message);
+                Log.Write(L.T("log.updateApplyFailed", e.Message));
                 return false;
             }
             // старая версия лежит в zapret2.old, пока новая не запустится успешно (см. StartAsync)
-            Log.Write("zapret2 обновлён до " + ver + ".");
+            Log.Write(L.T("log.updated", ver));
             return true;
         }
 
@@ -330,12 +330,12 @@ namespace Zarp.Core
             {
                 if (Directory.Exists(Dir)) Directory.Delete(Dir, true);
                 Directory.Move(OldDir, Dir);
-                Log.Write("Новая версия zapret2 не запустилась, возвращена " + Version + ".");
+                Log.Write(L.T("log.rolledBack", Version));
                 return true;
             }
             catch (Exception e)
             {
-                Log.Write("Не удалось вернуть прежнюю версию zapret2: " + e.Message);
+                Log.Write(L.T("log.rollbackFailed", e.Message));
                 return false;
             }
         }
@@ -365,7 +365,7 @@ namespace Zarp.Core
             Directory.CreateDirectory(Dir);
             string cmd = $"-NoProfile -NonInteractive -Command \"Add-MpPreference -ExclusionPath '{Dir.Replace("'", "''")}'\"";
             var r = await ProcessUtil.RunAsync("powershell.exe", cmd, 30000);
-            Log.Write(r.Ok ? "Папка добавлена в исключения Защитника: " + Dir : "Не удалось добавить исключение: " + r.Output);
+            Log.Write(r.Ok ? L.T("log.defenderAdded", Dir) : L.T("log.defenderFailed", r.Output));
             return r.Ok;
         }
 
@@ -423,15 +423,15 @@ namespace Zarp.Core
 
         public bool Running => FindOurProcesses().Any();
 
-        /// <summary>Запустить winws2 со стратегией. При ошибке возвращает текст ошибки.</summary>
-        public async Task<string> StartAsync(Strategy s, bool restrictToWarpIps)
+        /// <summary>Запустить winws2 со стратегией. При ошибке возвращает её описание.</summary>
+        public async Task<Msg> StartAsync(Strategy s, bool restrictToWarpIps)
         {
             Stop();
             bool updated = ApplyPendingUpdate(); // winws2 остановлен - самое время подменить файлы
             if (!s.UsesZapret) return null;
-            if (!Installed) return "zapret2 не установлен";
+            if (!Installed) return new Msg("err.zapretMissing");
 
-            string err = await StartWithRetryAsync(s, restrictToWarpIps);
+            var err = await StartWithRetryAsync(s, restrictToWarpIps);
             if (err == null)
             {
                 if (updated) try { Directory.Delete(OldDir, true); } catch { }
@@ -442,10 +442,10 @@ namespace Zarp.Core
             return err;
         }
 
-        async Task<string> StartWithRetryAsync(Strategy s, bool restrictToWarpIps)
+        async Task<Msg> StartWithRetryAsync(Strategy s, bool restrictToWarpIps)
         {
             File.WriteAllText(CfgFile, BuildConfig(s, restrictToWarpIps), new UTF8Encoding(false));
-            string err = null;
+            Msg err = null;
             for (int attempt = 0; attempt < 2; attempt++)
             {
                 err = await StartOnceAsync();
@@ -458,7 +458,7 @@ namespace Zarp.Core
 
         Process _shell;
 
-        async Task<string> StartOnceAsync()
+        async Task<Msg> StartOnceAsync()
         {
             try { File.Delete(LogFile); } catch { }
 
@@ -475,7 +475,7 @@ namespace Zarp.Core
             }
             catch (Exception e)
             {
-                return "Не удалось запустить winws2: " + e.Message;
+                return new Msg("err.winwsStart", e.Message);
             }
 
             // winws2 падает сразу, если фильтр/аргументы неверны или драйвер не загрузился
@@ -487,7 +487,7 @@ namespace Zarp.Core
             if (Running) return null;
             string log = "";
             try { log = File.ReadAllText(LogFile).Trim(); } catch { }
-            return "winws2 завершился: " + (log.Length > 0 ? Tail(log, 6) : "без вывода (возможно, WinDivert заблокирован антивирусом)");
+            return log.Length > 0 ? new Msg("err.winwsExited", Tail(log, 6)) : new Msg("err.winwsExitedSilent");
         }
 
         static string Tail(string text, int lines)

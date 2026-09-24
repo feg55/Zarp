@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Linq;
 using System.Windows.Forms;
 using Zarp.Core;
 
@@ -11,14 +12,22 @@ namespace Zarp.UI
         readonly bool _autostart, _connectNow;
 
         readonly PowerButton _power = new PowerButton();
+        readonly Label _sub = new Label();
         readonly Label _status = new Label();
         readonly Label _detail = new Label();
         readonly Label _hint = new Label();
         readonly Panel _progress = new Panel();
         readonly LinkLabel _logToggle = new LinkLabel();
         readonly TextBox _log = new TextBox();
+        readonly SettingsButton _settings = new SettingsButton();
+        readonly LanguageButton _language = new LanguageButton();
+        readonly ToolTip _tips = new ToolTip();
+        readonly ContextMenuStrip _languageMenu = new ContextMenuStrip();
         readonly NotifyIcon _tray = new NotifyIcon();
+        readonly ToolStripMenuItem _trayOpen = new ToolStripMenuItem();
         readonly ToolStripMenuItem _trayToggle = new ToolStripMenuItem();
+        readonly ToolStripMenuItem _traySettings = new ToolStripMenuItem();
+        readonly ToolStripMenuItem _trayExit = new ToolStripMenuItem();
 
         Icon _iconOn, _iconOff, _iconBusy;
         bool _exiting, _exitComplete, _trayHintShown;
@@ -50,11 +59,13 @@ namespace Zarp.UI
 
             BuildUi();
             BuildTray();
+            ApplyTexts();
 
             _engine.Changed += () => { if (IsHandleCreated) BeginInvoke((Action)UpdateUi); };
             _engine.AskAntivirusExclusion = AskExclusion;
             _engine.AskContinueWithVpn = AskVpn;
             Log.Line += line => { if (IsHandleCreated) BeginInvoke((Action)(() => AppendLog(line))); };
+            L.Changed += ApplyTexts;
         }
 
         void BuildUi()
@@ -64,15 +75,20 @@ namespace Zarp.UI
                 Text = "Zarp", Font = Theme.Font(18f, FontStyle.Bold), ForeColor = Theme.Text,
                 AutoSize = true, Location = new Point(22, 16),
             };
-            var sub = new Label
-            {
-                Text = "Cloudflare WARP поверх zapret2", Font = Theme.Font(9f), ForeColor = Theme.TextDim,
-                AutoSize = true, Location = new Point(25, 52),
-            };
-            var settings = new SettingsButton();
-            settings.Location = new Point(ClientSize.Width - 62, 20);
-            settings.Click += (s, e) => OpenSettings();
-            new ToolTip().SetToolTip(settings, "Настройки и выбор стратегии");
+            _sub.Font = Theme.Font(9f);
+            _sub.ForeColor = Theme.TextDim;
+            _sub.AutoSize = true;
+            _sub.Location = new Point(25, 52);
+
+            _settings.Location = new Point(ClientSize.Width - 62, 20);
+            _settings.Click += (s, e) => OpenSettings();
+            _language.Location = new Point(_settings.Left - _language.Width - 6, 20);
+            _language.Click += (s, e) => ShowLanguageMenu();
+
+            _languageMenu.Renderer = new DarkMenuRenderer();
+            _languageMenu.ShowImageMargin = false;
+            _languageMenu.ShowCheckMargin = false;
+            _languageMenu.Padding = new Padding(3);
 
             _power.Size = new Size(200, 200);
             _power.Location = new Point((ClientSize.Width - 200) / 2, 92);
@@ -92,12 +108,12 @@ namespace Zarp.UI
             _progress.BackColor = Theme.Panel;
             _progress.Paint += PaintProgress;
 
+            // три строки: подсказка на некоторых языках заметно длиннее русской
             _hint.Font = Theme.Font(8.5f);
             _hint.ForeColor = Theme.TextDim;
             _hint.TextAlign = ContentAlignment.MiddleCenter;
-            _hint.SetBounds(20, 408, ClientSize.Width - 40, 36);
+            _hint.SetBounds(20, 404, ClientSize.Width - 40, 52);
 
-            _logToggle.Text = "Журнал ▾";
             _logToggle.LinkColor = Theme.TextDim;
             _logToggle.ActiveLinkColor = Theme.Text;
             _logToggle.LinkBehavior = LinkBehavior.HoverUnderline;
@@ -116,23 +132,78 @@ namespace Zarp.UI
             _log.Visible = false;
             Theme.DarkScrollBars(_log);
 
-            Controls.AddRange(new Control[] { title, sub, settings, _power, _status, _detail, _progress, _hint, _logToggle, _log });
+            Controls.AddRange(new Control[] { title, _sub, _language, _settings, _power, _status, _detail, _progress, _hint, _logToggle, _log });
         }
 
         void BuildTray()
         {
-            var menu = new ContextMenuStrip();
-            menu.Items.Add("Открыть", null, (s, e) => ShowFromTray());
+            var menu = new ContextMenuStrip { Renderer = new DarkMenuRenderer(), ShowImageMargin = false };
+            _trayOpen.Click += (s, e) => ShowFromTray();
             _trayToggle.Click += async (s, e) => await OnPowerClick();
-            menu.Items.Add(_trayToggle);
-            menu.Items.Add("Настройки", null, (s, e) => { ShowFromTray(); OpenSettings(); });
-            menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("Выход", null, async (s, e) => await ExitApp());
+            _traySettings.Click += (s, e) => { ShowFromTray(); OpenSettings(); };
+            _trayExit.Click += async (s, e) => await ExitApp();
+            menu.Items.AddRange(new ToolStripItem[] { _trayOpen, _trayToggle, _traySettings, new ToolStripSeparator(), _trayExit });
             _tray.ContextMenuStrip = menu;
             _tray.Text = "Zarp";
             _tray.Icon = _iconOff;
             _tray.Visible = true;
             _tray.MouseClick += (s, e) => { if (e.Button == MouseButtons.Left) ShowFromTray(); };
+        }
+
+        /// <summary>Все тексты окна и меню трея на текущем языке. Вызывается и при смене языка.</summary>
+        void ApplyTexts()
+        {
+            _sub.Text = L.T("main.subtitle");
+            _tips.SetToolTip(_settings, L.T("main.settingsTip"));
+            _tips.SetToolTip(_language, L.T("main.languageTip"));
+            _settings.AccessibleName = L.T("main.settingsTip");
+            _language.AccessibleName = L.T("main.languageTip");
+            _logToggle.Text = L.T(_log.Visible ? "main.logHide" : "main.logShow");
+            _trayOpen.Text = L.T("tray.open");
+            _traySettings.Text = L.T("tray.settings");
+            _trayExit.Text = L.T("tray.exit");
+            UpdateUi();
+        }
+
+        void ShowLanguageMenu()
+        {
+            if (_languageMenu.Visible) { _languageMenu.Close(); return; }
+            string setting = _engine.Config.Language;
+            bool followSystem = !L.IsSupported(setting);
+            string system = L.Languages.First(l => l.Code == L.SystemLanguage).NativeName;
+
+            _languageMenu.Items.Clear();
+            _languageMenu.Font = Theme.Font(9.5f);
+            AddLanguageItem(L.T("lang.system", system), null, followSystem);
+            _languageMenu.Items.Add(new ToolStripSeparator());
+            foreach (var language in L.Languages)
+                AddLanguageItem(language.NativeName, language.Code, !followSystem && setting == language.Code);
+
+            // строки одной высоты и ширины, как в выпадающем списке настроек
+            var items = _languageMenu.Items.OfType<ToolStripMenuItem>().ToList();
+            int width = Math.Max(180, items.Max(i => TextRenderer.MeasureText(i.Text, _languageMenu.Font).Width) + 36);
+            foreach (var item in items)
+            {
+                item.AutoSize = false;
+                item.Size = new Size(width, Math.Max(30, _languageMenu.Font.Height + 12));
+            }
+            _languageMenu.Show(_language, new Point(_language.Width - width - _languageMenu.Padding.Horizontal, _language.Height + 4));
+        }
+
+        void AddLanguageItem(string text, string code, bool current)
+        {
+            var item = new ToolStripMenuItem(text) { Checked = current };
+            item.Click += (s, e) => SetLanguage(code);
+            _languageMenu.Items.Add(item);
+        }
+
+        /// <summary>null - как в системе.</summary>
+        void SetLanguage(string code)
+        {
+            if (_engine.Config.Language == code) return;
+            _engine.Config.Language = code;
+            _engine.Config.Save();
+            L.Apply(code); // L.Changed → ApplyTexts
         }
 
         protected override void SetVisibleCore(bool value)
@@ -182,33 +253,33 @@ namespace Zarp.UI
             switch (st)
             {
                 case EngineState.Connected:
-                    _status.Text = "Подключено"; _status.ForeColor = Theme.Accent; break;
+                    _status.Text = L.T("status.connected"); _status.ForeColor = Theme.Accent; break;
                 case EngineState.Searching:
-                    _status.Text = "Поиск стратегии"; _status.ForeColor = Theme.Busy; break;
+                    _status.Text = L.T("status.searching"); _status.ForeColor = Theme.Busy; break;
                 case EngineState.Connecting:
-                    _status.Text = "Подключение..."; _status.ForeColor = Theme.Busy; break;
+                    _status.Text = L.T("status.connecting"); _status.ForeColor = Theme.Busy; break;
                 case EngineState.Preparing:
-                    _status.Text = "Подготовка..."; _status.ForeColor = Theme.Busy; break;
+                    _status.Text = L.T("status.preparing"); _status.ForeColor = Theme.Busy; break;
                 case EngineState.Disconnecting:
-                    _status.Text = "Отключение..."; _status.ForeColor = Theme.Busy; break;
+                    _status.Text = L.T("status.disconnecting"); _status.ForeColor = Theme.Busy; break;
                 default:
-                    _status.Text = "Отключено"; _status.ForeColor = Theme.Text; break;
+                    _status.Text = L.T("status.disconnected"); _status.ForeColor = Theme.Text; break;
             }
             _detail.Text = _engine.Detail;
 
             if (busy)
-                _hint.Text = "Нажмите на кнопку, чтобы отменить";
+                _hint.Text = L.T("hint.cancel");
             else if (st == EngineState.Connected)
-                _hint.Text = "Нажмите, чтобы отключиться";
+                _hint.Text = L.T("hint.disconnect");
             else if (_engine.Selected == null)
-                _hint.Text = "Нажмите, и Zarp сам найдёт самую быструю стратегию zapret2 и подключит WARP";
+                _hint.Text = L.T("hint.firstRun");
             else
-                _hint.Text = "Нажмите, чтобы подключиться. Стратегию можно сменить в настройках ⚙";
+                _hint.Text = L.T("hint.connect");
 
             _progress.Visible = _engine.ProgressTotal > 0;
             _progress.Invalidate();
 
-            _trayToggle.Text = busy ? "Отменить" : st == EngineState.Connected ? "Отключить" : "Подключить";
+            _trayToggle.Text = L.T(busy ? "tray.cancel" : st == EngineState.Connected ? "tray.disconnect" : "tray.connect");
             _tray.Icon = st == EngineState.Connected ? _iconOn : busy ? _iconBusy : _iconOff;
             string trayText = "Zarp: " + _status.Text;
             _tray.Text = trayText.Length > 63 ? trayText.Substring(0, 63) : trayText;
@@ -226,7 +297,7 @@ namespace Zarp.UI
         {
             bool show = !_log.Visible;
             _log.Visible = show;
-            _logToggle.Text = show ? "Журнал ▴" : "Журнал ▾";
+            _logToggle.Text = L.T(show ? "main.logHide" : "main.logShow");
             ClientSize = new Size(ClientSize.Width, CompactHeight + (show ? LogHeight : 0));
             if (show) { _log.SelectionStart = _log.TextLength; _log.ScrollToCaret(); }
         }
@@ -239,10 +310,7 @@ namespace Zarp.UI
 
         bool AskExclusion(string dir)
         {
-            Func<bool> ask = () => MessageBox.Show(this,
-                "Антивирус (обычно Защитник Windows) заблокировал файлы zapret2.\n\n" +
-                "Это известное ложное срабатывание на драйвер WinDivert, которым zapret перехватывает трафик.\n\n" +
-                "Добавить папку в исключения Защитника Windows и повторить загрузку?\n\n" + dir,
+            Func<bool> ask = () => MessageBox.Show(this, L.T("dlg.antivirus", dir),
                 "Zarp", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes;
             return InvokeRequired ? (bool)Invoke(ask) : ask();
         }
@@ -250,10 +318,7 @@ namespace Zarp.UI
         bool AskVpn(System.Collections.Generic.List<string> adapters)
         {
             if (_autostart && !Visible) return true; // при автозапуске не мешаем диалогами, предупреждение есть в журнале
-            Func<bool> ask = () => MessageBox.Show(this,
-                "Включён другой VPN:\n\n" + string.Join("\n", adapters) + "\n\n" +
-                "Трафик WARP пойдёт через него, и zapret на него не повлияет: WARP может не подключиться, " +
-                "а подобранная стратегия будет неверной.\n\nЛучше выключить этот VPN. Всё равно продолжить?",
+            Func<bool> ask = () => MessageBox.Show(this, L.T("dlg.vpn", string.Join("\n", adapters)),
                 "Zarp", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) == DialogResult.Yes;
             return InvokeRequired ? (bool)Invoke(ask) : ask();
         }
@@ -310,8 +375,7 @@ namespace Zarp.UI
                     if (!_trayHintShown)
                     {
                         _trayHintShown = true;
-                        _tray.ShowBalloonTip(3000, "Zarp работает в фоне",
-                            "Иконка в трее. Чтобы выйти совсем: правый клик → Выход.", ToolTipIcon.Info);
+                        _tray.ShowBalloonTip(3000, L.T("tray.bgTitle"), L.T("tray.bgText"), ToolTipIcon.Info);
                     }
                     return;
                 }
@@ -335,7 +399,7 @@ namespace Zarp.UI
             if (handover)
             {
                 // winws2 и подключение принадлежат этой копии: освобождаем всё, новая копия подключится сама
-                Log.Write("Другая копия Zarp попросила закрыться: освобождаю WARP и winws2.");
+                Log.Write(L.T("log.handover"));
                 await _engine.StopForHandoverAsync();
             }
             else
@@ -351,7 +415,10 @@ namespace Zarp.UI
         {
             if (disposing)
             {
+                L.Changed -= ApplyTexts;
                 _tray.Dispose();
+                _tips.Dispose();
+                _languageMenu.Dispose();
                 _iconOn?.Dispose(); _iconOff?.Dispose(); _iconBusy?.Dispose();
             }
             base.Dispose(disposing);

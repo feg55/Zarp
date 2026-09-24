@@ -24,6 +24,14 @@ namespace Zarp
             bool autostart = args.Any(a => a.Equals("--autostart", StringComparison.OrdinalIgnoreCase));
             bool connect = args.Any(a => a.Equals("--connect", StringComparison.OrdinalIgnoreCase));
 
+            // exe - один файл, лежит где угодно; всё изменяемое (настройки, журнал, zapret2) - в %LOCALAPPDATA%\Zarp
+            string exeDir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\');
+            string dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Zarp");
+            Directory.CreateDirectory(dataDir);
+            MigrateFromExeDir(exeDir, dataDir);
+            // язык нужен уже для первого диалога (о второй копии Zarp), поэтому читаем его до всего остального
+            L.Apply(AppConfig.ReadLanguage(Path.Combine(dataDir, "zarp.json")));
+
             using (var mutex = new Mutex(true, Instances.MutexName, out bool owned))
             {
                 var all = Instances.Find();
@@ -38,7 +46,7 @@ namespace Zarp
                 if (others.Count > 0 && !TakeOver(mutex, others, ref owned, ref connect))
                     return;
 
-                try { Run(autostart, connect); }
+                try { Run(dataDir, autostart, connect); }
                 finally { mutex.ReleaseMutex(); }
             }
         }
@@ -50,10 +58,8 @@ namespace Zarp
         static bool TakeOver(Mutex mutex, System.Collections.Generic.List<Instances.Other> others, ref bool owned, ref bool connect)
         {
             var paths = others.Select(o => o.Path).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            bool many = paths.Count > 1;
             var answer = MessageBox.Show(
-                (many ? "Уже запущены другие копии Zarp:" : "Уже запущена другая копия Zarp:") + "\n\n" + string.Join("\n", paths) + "\n\n" +
-                (many ? "Закрыть их" : "Закрыть её") + " и открыть эту? Если WARP подключён, Zarp переподключит его сам.",
+                L.T(paths.Count > 1 ? "dlg.otherCopies" : "dlg.otherCopy", string.Join("\n", paths)),
                 "Zarp", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
             if (answer != DialogResult.Yes)
             {
@@ -71,8 +77,7 @@ namespace Zarp
             }
             if (!owned)
             {
-                MessageBox.Show("Не удалось закрыть другую копию Zarp. Закройте её через значок в трее и запустите Zarp снова.",
-                    "Zarp", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(L.T("dlg.otherCopyFailed"), "Zarp", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
             if (wasConnected)
@@ -101,17 +106,11 @@ namespace Zarp
             catch { }
         }
 
-        static void Run(bool autostart, bool connect)
+        static void Run(string dataDir, bool autostart, bool connect)
         {
-            // exe - один файл, лежит где угодно; всё изменяемое (настройки, журнал, zapret2) - в %LOCALAPPDATA%\Zarp
-            string exeDir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\');
-            string dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Zarp");
-            Directory.CreateDirectory(dataDir);
-            MigrateFromExeDir(exeDir, dataDir);
-
             Log.Init(Path.Combine(dataDir, "zarp.log"));
             Log.Line += StartupLog.Add;
-            Log.Write("Zarp запущен: " + Application.ExecutablePath);
+            Log.Write(L.T("log.started", Application.ExecutablePath));
             Licenses.Extract(dataDir);
 
             var engine = new Engine(dataDir);
@@ -124,7 +123,7 @@ namespace Zarp
                 Listen(quitEvent, form, () => { var _ = form.ExitForHandoverAsync(); });
                 Application.Run(form);
             }
-            Log.Write("Zarp завершён");
+            Log.Write(L.T("log.exited"));
         }
 
         /// <summary>Ждать сигнала от другого процесса и выполнять действие в потоке окна.</summary>

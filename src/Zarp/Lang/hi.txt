@@ -1,0 +1,188 @@
+# Zarp: हिन्दी। कुंजियाँ en.txt जैसी ही हैं।
+
+# ---- मुख्य विंडो
+main.subtitle = zapret2 के ज़रिए Cloudflare WARP
+main.settingsTip = सेटिंग्स और रणनीति
+main.languageTip = भाषा
+main.logShow = लॉग ▾
+main.logHide = लॉग ▴
+lang.system = सिस्टम की भाषा ({0})
+
+status.connected = कनेक्टेड
+status.searching = रणनीति खोजी जा रही है
+status.connecting = कनेक्ट हो रहा है...
+status.preparing = तैयारी हो रही है...
+status.disconnecting = डिस्कनेक्ट हो रहा है...
+status.disconnected = डिस्कनेक्टेड
+
+hint.cancel = रद्द करने के लिए बटन दबाएँ
+hint.disconnect = डिस्कनेक्ट करने के लिए दबाएँ
+hint.firstRun = दबाएँ, Zarp सबसे तेज़ zapret2 रणनीति खोजकर WARP कनेक्ट कर देगा
+hint.connect = कनेक्ट करने के लिए दबाएँ। रणनीति सेटिंग्स में बदली जा सकती है ⚙
+
+tray.open = खोलें
+tray.settings = सेटिंग्स
+tray.exit = बाहर निकलें
+tray.cancel = रद्द करें
+tray.connect = कनेक्ट करें
+tray.disconnect = डिस्कनेक्ट करें
+tray.bgTitle = Zarp बैकग्राउंड में चल रहा है
+tray.bgText = इसका आइकन सिस्टम ट्रे में है। पूरी तरह बंद करने के लिए: राइट-क्लिक → बाहर निकलें।
+
+# ---- डायलॉग
+dlg.antivirus = एंटीवायरस (आमतौर पर Windows Defender) ने zapret2 की फ़ाइलें ब्लॉक कर दी हैं।\n\nयह WinDivert ड्राइवर पर जाना-पहचाना गलत अलार्म है, जिससे zapret ट्रैफ़िक इंटरसेप्ट करता है।\n\nक्या फ़ोल्डर को Windows Defender के अपवादों में जोड़कर फिर से कोशिश करें?\n\n{0}
+dlg.vpn = एक और VPN चालू है:\n\n{0}\n\nWARP का ट्रैफ़िक उसी से होकर जाएगा और zapret उस पर असर नहीं करेगा: WARP शायद कनेक्ट न हो और चुनी गई रणनीति गलत होगी।\n\nबेहतर है कि इस VPN को बंद कर दें। फिर भी जारी रखें?
+dlg.defender = क्या zapret2 फ़ोल्डर को Windows Defender के अपवादों में जोड़ें?\n\n{0}
+dlg.otherCopy = Zarp की एक और कॉपी पहले से चल रही है:\n\n{0}\n\nक्या उसे बंद करके यह वाली खोलें? अगर WARP कनेक्टेड है, तो Zarp उसे फिर से कनेक्ट कर देगा।
+dlg.otherCopies = Zarp की दूसरी कॉपियाँ पहले से चल रही हैं:\n\n{0}\n\nक्या उन्हें बंद करके यह वाली खोलें? अगर WARP कनेक्टेड है, तो Zarp उसे फिर से कनेक्ट कर देगा।
+dlg.otherCopyFailed = Zarp की दूसरी कॉपी बंद नहीं हो सकी। उसे ट्रे आइकन से बंद करें और Zarp फिर से शुरू करें।
+
+close.caption = Zarp बंद करना
+close.question = विंडो बंद करने पर क्या हो?
+close.trayInfo = ट्रे में Zarp बैकग्राउंड में चलता रहेगा।
+close.exitDisconnects = बाहर निकलने पर WARP डिस्कनेक्ट हो जाएगा।
+close.exitKeeps = बाहर निकलने के बाद भी WARP कनेक्टेड रहेगा।
+close.remember = मेरी पसंद याद रखें
+close.hint = इसे बाद में सेटिंग्स में बदला जा सकता है।
+close.toTray = ट्रे में छिपाएँ
+close.exit = ऐप बंद करें
+
+# ---- सेटिंग्स
+settings.caption = Zarp सेटिंग्स
+settings.strategy = रणनीति
+settings.explain = डबल-क्लिक या "उपयोग करें" से रणनीति चालू होती है। ✔ मौजूदा, ✔✔ दो स्वतंत्र जाँचों में सफल।
+settings.options = विकल्प
+settings.checking = जाँच हो रही है...
+settings.zapretMissing = इंस्टॉल नहीं है
+settings.updatePending = , अपडेट कनेक्ट करने पर लागू होगा
+settings.directTip = zapret के बिना WARP
+col.strategy = रणनीति
+col.protocol = प्रोटोकॉल
+col.result = नतीजा
+col.connect = कनेक्शन, ms
+col.ping = पिंग, ms
+btn.use = उपयोग करें
+btn.testSelected = चुनी हुई जाँचें
+btn.quickScan = तेज़ खोज
+btn.fullScan = पूरी खोज
+btn.cancel = रद्द करें
+tip.quickScan = {0} काम करने वाली रणनीतियाँ मिलते ही रुक जाती है (विकल्पों में बदलें)
+tip.fullScan = सभी {0} रणनीतियाँ जाँचती है। ज़्यादा समय लगता है, पर कोई नहीं छूटती
+btn.custom = अपनी रणनीतियाँ...
+btn.dataFolder = डेटा फ़ोल्डर
+btn.defender = Defender अपवाद
+btn.checkUpdates = अपडेट देखें
+btn.licenses = लाइसेंस
+btn.close = बंद करें
+opt.autoConnect = Zarp शुरू होते ही कनेक्ट करें
+opt.autostart = Windows के साथ शुरू करें
+opt.onClose = बंद करने पर:
+opt.closeAsk = हर बार पूछें
+opt.closeTray = ट्रे में छिपाएँ
+opt.closeExit = ऐप बंद करें
+opt.closeAccessible = विंडो बंद करने पर कार्रवाई
+opt.disconnectOnExit = बाहर निकलने पर WARP डिस्कनेक्ट करें
+opt.restrict = सिर्फ़ WARP के पते इंटरसेप्ट करें
+opt.isolate = जाँचें अलग रखें (हर बार नया एंडपॉइंट)
+opt.autoUpdate = zapret2 अपने-आप अपडेट करें
+opt.timeout = कनेक्शन का इंतज़ार, सेकंड
+opt.stopAfter = तेज़ खोज: कितनी काम\nकरने वाली खोजें
+
+result.notTested = जाँची नहीं गई
+result.works2 = काम करती है ✔✔
+result.works1 = काम करती है (1 जाँच)
+result.notConfirmed = पुष्टि नहीं हुई: {0}
+result.applyFailed = लागू करने पर कनेक्ट नहीं हुई
+
+strategy.direct = zapret के बिना (सीधा कनेक्शन)
+
+# ---- बटन के नीचे स्थिति
+detail.disconnecting = डिस्कनेक्ट हो रहा है...
+detail.disconnected = डिस्कनेक्टेड
+detail.noWarp = Cloudflare WARP इंस्टॉल नहीं है
+detail.strategy = रणनीति: {0}
+detail.noStrategy = अभी कोई रणनीति नहीं चुनी गई
+detail.warpConnected = WARP कनेक्टेड है
+detail.cancelled = रद्द किया गया
+detail.error = त्रुटि: {0}
+detail.preparing = तैयारी हो रही है...
+detail.vpnOff = दूसरा VPN बंद करें
+detail.registerFailed = WARP रजिस्टर नहीं हो सका
+detail.avBlocked = एंटीवायरस ने zapret2 को ब्लॉक किया है
+detail.downloadFailed = zapret2 डाउनलोड नहीं हो सका
+detail.testing = {0}/{1}: {2}
+detail.rechecking = दोबारा जाँच {0}/{1}: {2}
+detail.notFound = काम करने वाली कोई रणनीति नहीं मिली
+detail.foundButFailed = रणनीतियाँ मिलीं, लेकिन कनेक्ट नहीं हो सका
+detail.connectingTo = कनेक्ट हो रहा है: {0}
+detail.winwsFailed = winws2 शुरू नहीं हो सका
+detail.connectFailed = कनेक्ट नहीं हो सका
+
+progress.findRelease = zapret2 की नई रिलीज़ खोजी जा रही है...
+progress.downloading = zapret2 {0} डाउनलोड हो रहा है...
+progress.installed = zapret2 इंस्टॉल हो गया।
+
+# ---- रणनीति जाँच की त्रुटियाँ
+err.timeout = {0} सेकंड में कनेक्शन नहीं हुआ
+err.noTraffic = WARP कनेक्टेड है, लेकिन ट्रैफ़िक उससे होकर नहीं जा रहा
+err.zapretMissing = zapret2 इंस्टॉल नहीं है
+err.winwsStart = winws2 शुरू नहीं हो सका: {0}
+err.winwsExited = winws2 बंद हो गया: {0}
+err.winwsExitedSilent = winws2 बिना किसी संदेश के बंद हो गया (शायद एंटीवायरस WinDivert को ब्लॉक कर रहा है)
+err.avBlockedFile = एंटीवायरस ने फ़ाइल {0} ब्लॉक कर दी
+err.filesMissing = एक्सट्रैक्ट करने के बाद zapret2 की कुछ फ़ाइलें नहीं मिलीं (शायद एंटीवायरस ने उन्हें हटा दिया)।
+err.noZipAsset = रिलीज़ {0} में zip आर्काइव नहीं है।
+
+# ---- लॉग
+log.started = Zarp शुरू हुआ: {0}
+log.exited = Zarp बंद हुआ
+log.handover = Zarp की दूसरी कॉपी ने इसे बंद करने को कहा: WARP और winws2 छोड़े जा रहे हैं।
+log.savedFailed = सहेजी गई रणनीति "{0}" काम नहीं आई, दूसरी जाँची हुई रणनीतियाँ आज़माई जा रही हैं।
+log.verifiedFailed = जाँची हुई रणनीतियाँ काम नहीं आईं, फिर से खोज हो रही है।
+log.notExtracted = zapret2 अभी एक्सट्रैक्ट नहीं हुआ: {0}
+log.updateCheckFailed = zapret2 के अपडेट नहीं देखे जा सके: {0}
+log.upToDate = zapret2 {0} सबसे नया वर्ज़न है।
+log.updateDownloaded = zapret2 {0} डाउनलोड हो गया।
+log.updateOnConnect = अपडेट अगली बार कनेक्ट करने पर लागू होगा।
+log.updateRestartFailed = अपडेट के बाद winws2 शुरू नहीं हुआ: {0}
+log.cancelled = कार्रवाई रद्द की गई।
+log.error = त्रुटि: {0}
+log.noWarpCli = warp-cli.exe नहीं मिला। Cloudflare WARP इंस्टॉल करें: https://one.one.one.one/
+log.otherDpi = ध्यान दें: एक और DPI बायपास टूल चल रहा है, वह बाधा डाल सकता है: {0}
+log.otherVpn = ध्यान दें: एक और VPN चालू है, WARP का ट्रैफ़िक उसी से होकर जा रहा है: {0}
+log.vpnAdvice = दूसरा VPN बंद करें, वरना WARP शायद कनेक्ट न हो और रणनीति गलत चुनी जाए।
+log.downloadFailed = zapret2 डाउनलोड नहीं हो सका: {0}
+log.manualInstall = आप इसे खुद भी एक्सट्रैक्ट कर सकते हैं: {0} को {1} में रखें
+log.searchQuick = तेज़ खोज: {0} रणनीतियाँ, {1} काम करने वाली मिलने पर रुकें
+log.searchFull = पूरी खोज: {0} रणनीतियाँ
+log.searchSelected = चुनी हुई रणनीतियों की जाँच: {0}
+log.testOk = ✔ {0}: कनेक्शन {1} ms, पिंग {2} ms
+log.testFail = ✘ {0}: {1}
+log.recheck = दोबारा जाँच के लिए उम्मीदवार: {0}
+log.recheckOk = ✔✔ {0}: पुष्टि हुई (कनेक्शन {1} ms, पिंग {2} ms)
+log.candidatesFailed = उम्मीदवार दोबारा जाँच में सफल नहीं हुए, शायद वे संयोग से चल गए थे। फिर से खोजें या इंतज़ार का समय बढ़ाएँ।
+log.noneWorked = कोई रणनीति काम नहीं आई। सेटिंग्स में इंतज़ार का समय बढ़ाएँ या {0} में अपनी रणनीतियाँ जोड़ें
+log.best = सबसे अच्छी रणनीति: {0} (कनेक्शन {1} ms, पिंग {2} ms)
+log.tryNext = "{0}" कनेक्ट नहीं हुई, अगली आज़माई जा रही है।
+log.connectingWith = इस रणनीति से कनेक्ट हो रहा है: {0}
+log.warpNotConnected = WARP कनेक्ट नहीं हुआ।
+log.warpConnectedIn = WARP {0} ms में कनेक्ट हुआ।
+log.releasesFallback = releases/latest उपलब्ध नहीं है, GitHub API आज़माया जा रहा है: {0}
+log.extracted = zapret2 {0} प्रोग्राम से एक्सट्रैक्ट किया गया।
+log.updateApplyFailed = zapret2 का अपडेट लागू नहीं हो सका: {0}
+log.updated = zapret2 को {0} पर अपडेट किया गया।
+log.rolledBack = zapret2 का नया वर्ज़न शुरू नहीं हुआ, {0} वापस लाया गया।
+log.rollbackFailed = zapret2 का पिछला वर्ज़न वापस नहीं लाया जा सका: {0}
+log.defenderAdded = फ़ोल्डर Defender के अपवादों में जोड़ा गया: {0}
+log.defenderFailed = अपवाद नहीं जोड़ा जा सका: {0}
+log.warpRegistering = WARP रजिस्टर नहीं है, रजिस्टर किया जा रहा है...
+log.warpRegistered = WARP रजिस्टर हो गया।
+log.warpRegisterFailed = WARP रजिस्टर करने में त्रुटि: {0}
+log.customReadFailed = {0} पढ़ा नहीं जा सका: {1}
+log.customSkipped = {0}: पंक्ति छोड़ी गई (फ़ॉर्मेट: नाम | h3/h2/wg | आर्ग्युमेंट): {1}
+log.autostartOn = ऑटोस्टार्ट चालू किया गया।
+log.autostartOff = ऑटोस्टार्ट बंद किया गया।
+log.autostartFailed = ऑटोस्टार्ट नहीं बदला जा सका: {0}
+log.licenseFailed = लाइसेंस {0} लिखा नहीं जा सका: {1}
+log.configBroken = सेटिंग्स खराब हैं, डिफ़ॉल्ट मान इस्तेमाल हो रहे हैं: {0}
+log.configSaveFailed = सेटिंग्स सहेजी नहीं जा सकीं: {0}

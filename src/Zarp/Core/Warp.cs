@@ -72,9 +72,9 @@ namespace Zarp.Core
         {
             var r = await Cli("registration show");
             if (r.Ok) return true;
-            Log.Write("WARP не зарегистрирован, регистрирую...");
+            Log.Write(L.T("log.warpRegistering"));
             r = await Cli("registration new", 30000);
-            Log.Write(r.Ok ? "Регистрация WARP выполнена." : "Ошибка регистрации WARP: " + r.Output);
+            Log.Write(r.Ok ? L.T("log.warpRegistered") : L.T("log.warpRegisterFailed", r.Output));
             return r.Ok;
         }
 

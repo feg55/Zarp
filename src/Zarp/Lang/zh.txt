@@ -1,0 +1,188 @@
+# Zarp：简体中文。键名与 en.txt 相同。
+
+# ---- 主窗口
+main.subtitle = 基于 zapret2 的 Cloudflare WARP
+main.settingsTip = 设置与策略
+main.languageTip = 语言
+main.logShow = 日志 ▾
+main.logHide = 日志 ▴
+lang.system = 跟随系统（{0}）
+
+status.connected = 已连接
+status.searching = 正在查找策略
+status.connecting = 正在连接...
+status.preparing = 正在准备...
+status.disconnecting = 正在断开...
+status.disconnected = 未连接
+
+hint.cancel = 按下按钮即可取消
+hint.disconnect = 按下即可断开连接
+hint.firstRun = 按下后，Zarp 会自动找到最快的 zapret2 策略并连接 WARP
+hint.connect = 按下即可连接。可在设置中更换策略 ⚙
+
+tray.open = 打开
+tray.settings = 设置
+tray.exit = 退出
+tray.cancel = 取消
+tray.connect = 连接
+tray.disconnect = 断开连接
+tray.bgTitle = Zarp 正在后台运行
+tray.bgText = 图标位于系统托盘。要彻底退出：右键 → 退出。
+
+# ---- 对话框
+dlg.antivirus = 杀毒软件（通常是 Windows Defender）拦截了 zapret2 的文件。\n\n这是对 WinDivert 驱动的已知误报，zapret 用它来拦截流量。\n\n要将该文件夹加入 Windows Defender 排除项并重试吗？\n\n{0}
+dlg.vpn = 另一个 VPN 已开启：\n\n{0}\n\nWARP 流量会经过它，zapret 将无法起作用：WARP 可能无法连接，选出的策略也会不准确。\n\n建议关闭该 VPN。仍要继续吗？
+dlg.defender = 要将 zapret2 文件夹加入 Windows Defender 排除项吗？\n\n{0}
+dlg.otherCopy = 另一个 Zarp 副本已在运行：\n\n{0}\n\n要关闭它并打开当前这个吗？如果 WARP 已连接，Zarp 会自动重新连接。
+dlg.otherCopies = 其他 Zarp 副本已在运行：\n\n{0}\n\n要关闭它们并打开当前这个吗？如果 WARP 已连接，Zarp 会自动重新连接。
+dlg.otherCopyFailed = 无法关闭另一个 Zarp 副本。请通过它的托盘图标将其关闭，然后重新启动 Zarp。
+
+close.caption = 关闭 Zarp
+close.question = 关闭窗口时要做什么？
+close.trayInfo = 最小化到托盘后，Zarp 会继续在后台运行。
+close.exitDisconnects = 退出时将断开 WARP。
+close.exitKeeps = 退出后 WARP 将保持连接。
+close.remember = 记住我的选择
+close.hint = 之后可以在设置中更改。
+close.toTray = 最小化到托盘
+close.exit = 退出程序
+
+# ---- 设置
+settings.caption = Zarp 设置
+settings.strategy = 策略
+settings.explain = 双击或点击“使用”即可启用策略。✔ 当前策略，✔✔ 已通过两次独立检测。
+settings.options = 选项
+settings.checking = 正在检查...
+settings.zapretMissing = 未安装
+settings.updatePending = ，更新将在连接时应用
+settings.directTip = 不使用 zapret 的 WARP
+col.strategy = 策略
+col.protocol = 协议
+col.result = 结果
+col.connect = 连接（毫秒）
+col.ping = 延迟（毫秒）
+btn.use = 使用
+btn.testSelected = 检测所选
+btn.quickScan = 快速查找
+btn.fullScan = 完整查找
+btn.cancel = 取消
+tip.quickScan = 找到 {0} 个可用策略后停止（可在选项中设置）
+tip.fullScan = 检测全部 {0} 个策略。耗时更长，但不会遗漏
+btn.custom = 自定义策略...
+btn.dataFolder = 数据文件夹
+btn.defender = Defender 排除项
+btn.checkUpdates = 检查更新
+btn.licenses = 许可证
+btn.close = 关闭
+opt.autoConnect = 启动 Zarp 时自动连接
+opt.autostart = 开机时启动
+opt.onClose = 关闭窗口时：
+opt.closeAsk = 每次询问
+opt.closeTray = 最小化到托盘
+opt.closeExit = 退出程序
+opt.closeAccessible = 关闭窗口时的操作
+opt.disconnectOnExit = 退出时断开 WARP
+opt.restrict = 仅拦截 WARP 地址
+opt.isolate = 隔离检测（每次使用新端点）
+opt.autoUpdate = 自动更新 zapret2
+opt.timeout = 连接等待时间（秒）
+opt.stopAfter = 快速查找：找到几个\n可用策略后停止
+
+result.notTested = 未检测
+result.works2 = 可用 ✔✔
+result.works1 = 可用（1 次检测）
+result.notConfirmed = 未确认：{0}
+result.applyFailed = 应用时连接失败
+
+strategy.direct = 不使用 zapret（直接连接）
+
+# ---- 按钮下方的状态
+detail.disconnecting = 正在断开...
+detail.disconnected = 未连接
+detail.noWarp = 未安装 Cloudflare WARP
+detail.strategy = 策略：{0}
+detail.noStrategy = 尚未选择策略
+detail.warpConnected = WARP 已连接
+detail.cancelled = 已取消
+detail.error = 错误：{0}
+detail.preparing = 正在准备...
+detail.vpnOff = 请关闭其他 VPN
+detail.registerFailed = 无法注册 WARP
+detail.avBlocked = zapret2 被杀毒软件拦截
+detail.downloadFailed = 无法下载 zapret2
+detail.testing = {0}/{1}：{2}
+detail.rechecking = 复查 {0}/{1}：{2}
+detail.notFound = 未找到可用的策略
+detail.foundButFailed = 找到了策略，但连接失败
+detail.connectingTo = 正在连接：{0}
+detail.winwsFailed = winws2 启动失败
+detail.connectFailed = 连接失败
+
+progress.findRelease = 正在查找 zapret2 最新版本...
+progress.downloading = 正在下载 zapret2 {0}...
+progress.installed = zapret2 已安装。
+
+# ---- 策略检测错误
+err.timeout = {0} 秒内未连接
+err.noTraffic = WARP 已连接，但流量没有经过它
+err.zapretMissing = 未安装 zapret2
+err.winwsStart = 无法启动 winws2：{0}
+err.winwsExited = winws2 已退出：{0}
+err.winwsExitedSilent = winws2 已退出且没有输出（WinDivert 可能被杀毒软件拦截）
+err.avBlockedFile = 杀毒软件拦截了文件 {0}
+err.filesMissing = 解压后缺少 zapret2 文件（可能已被杀毒软件删除）。
+err.noZipAsset = 版本 {0} 中没有 zip 压缩包。
+
+# ---- 日志
+log.started = Zarp 已启动：{0}
+log.exited = Zarp 已退出
+log.handover = 另一个 Zarp 副本请求关闭当前副本：正在释放 WARP 和 winws2。
+log.savedFailed = 已保存的策略“{0}”无效，正在尝试其他已验证的策略。
+log.verifiedFailed = 已验证的策略都无效，重新查找。
+log.notExtracted = zapret2 尚未解压：{0}
+log.updateCheckFailed = 检查 zapret2 更新失败：{0}
+log.upToDate = zapret2 {0} 已是最新版本。
+log.updateDownloaded = 已下载 zapret2 {0}。
+log.updateOnConnect = 更新将在下次连接时应用。
+log.updateRestartFailed = 更新后 winws2 未能启动：{0}
+log.cancelled = 操作已取消。
+log.error = 错误：{0}
+log.noWarpCli = 未找到 warp-cli.exe。请安装 Cloudflare WARP：https://one.one.one.one/
+log.otherDpi = 注意：另一个反 DPI 工具正在运行，可能造成干扰：{0}
+log.otherVpn = 注意：另一个 VPN 处于活动状态，WARP 流量会经过它：{0}
+log.vpnAdvice = 请关闭其他 VPN，否则 WARP 可能无法连接，策略也会选错。
+log.downloadFailed = 无法下载 zapret2：{0}
+log.manualInstall = 也可以手动解压：将 {0} 放入 {1}
+log.searchQuick = 快速查找：共 {0} 个策略，找到 {1} 个可用策略后停止
+log.searchFull = 完整查找：共 {0} 个策略
+log.searchSelected = 检测所选策略：{0}
+log.testOk = ✔ {0}：连接 {1} 毫秒，延迟 {2} 毫秒
+log.testFail = ✘ {0}：{1}
+log.recheck = 待复查的候选策略：{0}
+log.recheckOk = ✔✔ {0}：已确认（连接 {1} 毫秒，延迟 {2} 毫秒）
+log.candidatesFailed = 候选策略未通过复查，可能只是偶然成功。请重新查找或增加等待时间。
+log.noneWorked = 没有可用的策略。请在设置中增加等待时间，或在 {0} 中添加自定义策略
+log.best = 最佳策略：{0}（连接 {1} 毫秒，延迟 {2} 毫秒）
+log.tryNext = “{0}”未能连接，正在尝试下一个。
+log.connectingWith = 正在使用策略连接：{0}
+log.warpNotConnected = WARP 未能连接。
+log.warpConnectedIn = WARP 在 {0} 毫秒内连接成功。
+log.releasesFallback = releases/latest 不可用，改用 GitHub API：{0}
+log.extracted = 已从程序中解压 zapret2 {0}。
+log.updateApplyFailed = 无法应用 zapret2 更新：{0}
+log.updated = zapret2 已更新到 {0}。
+log.rolledBack = 新版 zapret2 未能启动，已恢复 {0}。
+log.rollbackFailed = 无法恢复 zapret2 的旧版本：{0}
+log.defenderAdded = 已将文件夹加入 Defender 排除项：{0}
+log.defenderFailed = 无法添加排除项：{0}
+log.warpRegistering = WARP 未注册，正在注册...
+log.warpRegistered = WARP 注册完成。
+log.warpRegisterFailed = WARP 注册失败：{0}
+log.customReadFailed = 无法读取 {0}：{1}
+log.customSkipped = {0}：已跳过该行（格式：名称 | h3/h2/wg | 参数）：{1}
+log.autostartOn = 已启用开机启动。
+log.autostartOff = 已关闭开机启动。
+log.autostartFailed = 无法更改开机启动：{0}
+log.licenseFailed = 无法写入许可证 {0}：{1}
+log.configBroken = 设置已损坏，将使用默认值：{0}
+log.configSaveFailed = 无法保存设置：{0}
