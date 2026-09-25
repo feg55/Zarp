@@ -4,7 +4,17 @@
 [![Release](https://img.shields.io/github/v/release/feg55/Zarp)](https://github.com/feg55/Zarp/releases/latest)
 [![License: MIT](https://img.shields.io/github/license/feg55/Zarp)](LICENSE)
 
-One-click Cloudflare WARP for networks that block it. Zarp finds a [zapret2](https://github.com/bol-van/zapret2) strategy that gets the WARP handshake through DPI, remembers it and connects.
+One-click Cloudflare WARP for networks that block it. Zarp finds a [zapret2](https://github.com/bol-van/zapret2) strategy that gets the WARP handshake through DPI, remembers it and connects. Available for Windows and Android.
+
+## Download
+
+| Platform | Download | Requirements |
+|---|---|---|
+| **Windows** | [**Zarp.exe**](https://github.com/feg55/Zarp/releases/latest/download/Zarp.exe) · [all releases](https://github.com/feg55/Zarp/releases) | Windows 10/11 x64, [Cloudflare WARP](https://one.one.one.one/), administrator rights |
+| **Android** | [**APK**](https://github.com/feg55/Zarp-Android/releases/latest) · [source](https://github.com/feg55/Zarp-Android) | Android 8.0+, no root, no WARP app needed |
+
+[![Windows release](https://img.shields.io/github/v/release/feg55/Zarp?label=Windows)](https://github.com/feg55/Zarp/releases/latest)
+[![Android release](https://img.shields.io/github/v/release/feg55/Zarp-Android?label=Android)](https://github.com/feg55/Zarp-Android/releases/latest)
 
 ![Zarp](docs/screenshot.png)
 
@@ -18,6 +28,16 @@ One-click Cloudflare WARP for networks that block it. Zarp finds a [zapret2](htt
 - **Low overhead.** Only WARP addresses and handshake packets are intercepted. The tunnel itself never passes through zapret.
 - **Your language.** English, Русский, Español, Português, 中文, हिन्दी, Français and Deutsch. Zarp follows the Windows language (English if it is not on the list), and the globe button switches it on the fly.
 
+## Android
+
+[Zarp for Android](https://github.com/feg55/Zarp-Android) brings the same one-tap flow to phones: the same strategies, double-checked tests, quick and full scan, and the same 8 languages. It works a little differently under the hood:
+
+- **No WARP app needed.** Zarp talks to WARP itself over MASQUE and registers a free WARP device on first use.
+- **No root.** It is a regular Android VPN. Fake packets are sent from the tunnel's own UDP socket right before the real handshake.
+- **A subset of strategies.** Strategies that need raw sockets (badsum, md5 and similar) are shown as unsupported, WireGuard is not supported yet.
+
+Download the APK from [Releases](https://github.com/feg55/Zarp-Android/releases/latest). The rest of this page is about the Windows version.
+
 ## Requirements
 
 - Windows 10 or 11, x64
@@ -26,7 +46,7 @@ One-click Cloudflare WARP for networks that block it. Zarp finds a [zapret2](htt
 
 ## Usage
 
-1. Download `Zarp.exe` from [Releases](https://github.com/feg55/Zarp/releases/latest) and run it.
+1. Download [`Zarp.exe`](https://github.com/feg55/Zarp/releases/latest/download/Zarp.exe) and run it.
 2. Press the power button. The first search takes a minute or two.
 3. Done. Change the strategy any time in Settings.
 
@@ -123,7 +143,7 @@ Only `Zarp.exe` built by GitHub Actions from this repository is signed, and ever
 
 ## License
 
-Zarp is released under the [MIT License](LICENSE).
+Zarp for Windows is released under the [MIT License](LICENSE). [Zarp for Android](https://github.com/feg55/Zarp-Android) is a separate project under GPL-3.0.
 
 `Zarp.exe` bundles [zapret2](https://github.com/bol-van/zapret2) (MIT) with LuaJIT (MIT) and zlib, [WinDivert](https://reqrypt.org/windivert.html) (LGPL-3.0) and the Cygwin DLL (LGPL-3.0-or-later). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for versions, license texts and source links.
 
