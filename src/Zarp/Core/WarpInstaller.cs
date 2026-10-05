@@ -140,17 +140,26 @@ namespace Zarp.Core
             string encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
             var r = await ProcessUtil.RunAsync(ProcessUtil.PowerShellExe,
                 "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " + encoded, 90000);
+            return ParseSignatureOutput(r.Output, r.TimedOut);
+        }
 
+        /// <summary>
+        /// Разбор вывода проверки подписи: нужная строка SIGNER или STATUS среди прочего вывода PowerShell.
+        /// Принимает только действительную подпись Cloudflare. Файл со статусом Valid, но без сертификата
+        /// подписавшего (так выглядят системные файлы Windows с подписью в каталоге) тоже отвергается.
+        /// </summary>
+        internal static string ParseSignatureOutput(string output, bool timedOut)
+        {
             string subject = null, status = null;
-            foreach (string line in (r.Output ?? "").Split('\n').Select(l => l.Trim()))
+            foreach (string line in (output ?? "").Split('\n').Select(l => l.Trim()))
             {
                 if (line.StartsWith("SIGNER:")) subject = line.Substring(7);
                 else if (line.StartsWith("STATUS:")) status = line.Substring(7);
             }
             if (subject == null)
-                throw new Exception(L.T("err.warpSignature", status ?? (r.TimedOut ? "timeout" : "PowerShell: " + Shorten(r.Output))));
+                throw new Exception(L.T("err.warpSignature", status ?? (timedOut ? "timeout" : "PowerShell: " + Shorten(output))));
             if (!IsCloudflareSigner(subject))
-                throw new Exception(L.T("err.warpSignature", Shorten(subject)));
+                throw new Exception(L.T("err.warpSignature", subject.Trim().Length == 0 ? "no signer certificate" : Shorten(subject)));
             return "Cloudflare, Inc.";
         }
 

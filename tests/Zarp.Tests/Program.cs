@@ -602,11 +602,38 @@ static class Program
         File.WriteAllText(fresh, "x");
         Check(FindManual() == fresh, "The newest manual installer must win");
 
-        // подпись проверяется по-настоящему: чужая и отсутствующая отвергаются, файл остаётся открытым на чтение
+        // разбор вывода проверки подписи на готовых строках: результат не зависит от того, какие подписи есть у файлов этой Windows
+        var parse = typeof(WarpInstaller).GetMethod("ParseSignatureOutput", PrivateStatic);
+        string Signature(string output, bool timedOut = false)
+        {
+            try { return (string)parse.Invoke(null, new object[] { output, timedOut }); }
+            catch (TargetInvocationException e)
+            {
+                // рефлексия оборачивает исключение: достаём настоящее
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(e.InnerException).Throw();
+                throw;
+            }
+        }
+        Check(Signature("SIGNER:CN=\"Cloudflare, Inc.\", O=\"Cloudflare, Inc.\", L=San Francisco, C=US") == "Cloudflare, Inc.", "A Cloudflare signature is accepted");
+        Check(Signature("#< CLIXML\r\n<Objs Version=\"1.1.0.1\"></Objs>\r\nSIGNER:O=\"Cloudflare, Inc.\", C=US\r\n") == "Cloudflare, Inc.",
+            "PowerShell's own noise around the result must not matter");
+        var noCertificate = Catch(() => Signature("SIGNER:\r\n"));
+        Check(noCertificate != null && noCertificate.Message.Contains("no signer certificate"),
+            "Valid but without a signer certificate (catalog-signed Windows files) must be rejected: " + noCertificate?.Message);
+        var microsoft = Catch(() => Signature("SIGNER:CN=Microsoft Windows, O=Microsoft Corporation, C=US"));
+        Check(microsoft != null && microsoft.Message.Contains("Microsoft"), "A signature of someone else must be rejected: " + microsoft?.Message);
+        var notSigned = Catch(() => Signature("STATUS:NotSigned"));
+        Check(notSigned != null && notSigned.Message.Contains("NotSigned"), "An unsigned file must be rejected: " + notSigned?.Message);
+        var tampered = Catch(() => Signature("STATUS:HashMismatch"));
+        Check(tampered != null && tampered.Message.Contains("HashMismatch"), "A tampered file must be rejected: " + tampered?.Message);
+        Check(Catch(() => Signature("")) != null, "No answer from PowerShell must not count as a valid signature");
+        var slow = Catch(() => Signature("", timedOut: true));
+        Check(slow != null && slow.Message.Contains("timeout"), "A timeout must be reported: " + slow?.Message);
+
+        // и по-настоящему: PowerShell проверяет файл, который остаётся открытым на чтение, как при установке
         Task<string> Verify(string file) => (Task<string>)typeof(WarpInstaller).GetMethod("VerifySignatureAsync", PrivateStatic).Invoke(null, new object[] { file });
         string cmd = Path.Combine(Environment.SystemDirectory, "cmd.exe");
-        var microsoft = Catch(() => Sync(() => Verify(cmd)));
-        Check(microsoft != null && microsoft.Message.Contains("Microsoft"), "A file signed by someone else must be rejected: " + microsoft?.Message);
+        Check(Catch(() => Sync(() => Verify(cmd))) != null, "A Windows system file is not signed by Cloudflare and must be rejected");
         string unsigned = Assembly.GetExecutingAssembly().Location;
         using (new FileStream(unsigned, FileMode.Open, FileAccess.Read, FileShare.Read)) // как во время настоящей установки
         {
