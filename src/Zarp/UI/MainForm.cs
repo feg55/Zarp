@@ -64,6 +64,7 @@ namespace Zarp.UI
             _engine.Changed += () => { if (IsHandleCreated) BeginInvoke((Action)UpdateUi); };
             _engine.AskAntivirusExclusion = AskExclusion;
             _engine.AskContinueWithVpn = AskVpn;
+            _engine.AskInstallWarp = AskInstallWarp;
             Log.Line += line => { if (IsHandleCreated) BeginInvoke((Action)(() => AppendLog(line))); };
             L.Changed += ApplyTexts;
         }
@@ -271,6 +272,8 @@ namespace Zarp.UI
                 _hint.Text = L.T("hint.cancel");
             else if (st == EngineState.Connected)
                 _hint.Text = L.T("hint.disconnect");
+            else if (!_engine.Warp.Installed)
+                _hint.Text = L.T("hint.installWarp");
             else if (_engine.Selected == null)
                 _hint.Text = L.T("hint.firstRun");
             else
@@ -320,6 +323,15 @@ namespace Zarp.UI
             if (_autostart && !Visible) return true; // при автозапуске не мешаем диалогами, предупреждение есть в журнале
             Func<bool> ask = () => MessageBox.Show(this, L.T("dlg.vpn", string.Join("\n", adapters)),
                 "Zarp", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) == DialogResult.Yes;
+            return InvokeRequired ? (bool)Invoke(ask) : ask();
+        }
+
+        /// <summary>Установка меняет систему, поэтому она только с явного согласия пользователя.</summary>
+        bool AskInstallWarp()
+        {
+            if (_autostart && !Visible) return false; // при автозапуске Zarp скрыт в трее: вопрос никто не увидит
+            Func<bool> ask = () => MessageBox.Show(this, L.T("dlg.installWarp"),
+                "Zarp", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes;
             return InvokeRequired ? (bool)Invoke(ask) : ask();
         }
 

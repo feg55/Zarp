@@ -16,6 +16,7 @@ using Zarp.Core;
 static class Program
 {
     const BindingFlags PrivateInstance = BindingFlags.NonPublic | BindingFlags.Instance;
+    const BindingFlags PrivateStatic = BindingFlags.NonPublic | BindingFlags.Static;
     static readonly Assembly AppAssembly = typeof(Engine).Assembly;
     static string _data;
     static int _passed;
@@ -30,12 +31,15 @@ static class Program
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
         var watchdog = new System.Threading.Timer(_ =>
         {
-            Console.Error.WriteLine("FAIL: UI checks did not finish within 60 seconds.");
+            Console.Error.WriteLine("FAIL: checks did not finish within 120 seconds.");
             Environment.Exit(1);
-        }, null, 60000, System.Threading.Timeout.Infinite);
+        }, null, 120000, System.Threading.Timeout.Infinite);
 
         // Isolate UI tests from embedded driver extraction, WARP, and background downloads.
         typeof(Zapret).GetField("_embeddedVersion", BindingFlags.NonPublic | BindingFlags.Static).SetValue(null, "");
+        // Tests must never find, start or install the real Cloudflare WARP: the search always comes back empty
+        // (individual tests substitute their own results).
+        typeof(Warp).GetField("Finder", PrivateStatic).SetValue(null, (Func<WarpLocator.Result>)Missing);
         try
         {
             TestConfig();
@@ -54,6 +58,11 @@ static class Program
             TestSettings();
             TestLocalization();
             TestKeysUsedInCode();
+            TestWarpLocator();
+            TestWarpInstaller();
+            TestWarpDownload();
+            TestEnsureWarp();
+            TestInstallHint();
             CaptureControls();
             Console.WriteLine("PASS: " + _passed + " checks; WARP/WinDivert were not started.");
             watchdog.Dispose();
@@ -493,6 +502,372 @@ static class Program
         var unused = defined.Except(used).ToList();
         Check(missing.Count == 0, "Keys used in code but missing in en.txt: " + string.Join(", ", missing));
         Check(unused.Count == 0, "Keys in en.txt that the code never uses: " + string.Join(", ", unused));
+    }
+
+    // ------------------------------------------------------------------ Cloudflare WARP: поиск и установка
+
+    static WarpLocator.Result Missing()
+    {
+        var r = new WarpLocator.Result();
+        r.Report.Add("service CloudflareWARP: not registered");
+        return r;
+    }
+
+    static WarpLocator.Result Found(string cli)
+    {
+        var r = new WarpLocator.Result { CliPath = cli };
+        r.Report.Add("found: " + cli);
+        return r;
+    }
+
+    static void SetFinder(Func<WarpLocator.Result> finder) =>
+        typeof(Warp).GetField("Finder", PrivateStatic).SetValue(null, finder);
+
+    static T Sync<T>(Func<Task<T>> body) => Task.Run(body).GetAwaiter().GetResult();
+
+    static Exception Catch(Action action)
+    {
+        try { action(); return null; }
+        catch (Exception e) { return e; }
+    }
+
+    static void TestWarpLocator()
+    {
+        string Parse(string s) => (string)typeof(WarpLocator).GetMethod("ParseImagePath", PrivateStatic).Invoke(null, new object[] { s });
+        Check(Parse("\"C:\\Program Files\\Cloudflare\\Cloudflare WARP\\warp-svc.exe\"") == @"C:\Program Files\Cloudflare\Cloudflare WARP\warp-svc.exe",
+            "A quoted service path must be unquoted");
+        Check(Parse(@"C:\Tools\Cloudflare WARP\warp-svc.exe -k run") == @"C:\Tools\Cloudflare WARP\warp-svc.exe",
+            "Arguments after an unquoted service path must be dropped");
+        Check(Parse("\"D:\\My Apps\\x.exe\" --flag") == @"D:\My Apps\x.exe", "Quoted path with arguments");
+        Check(Parse(@"%SystemRoot%\system32\svchost.exe -k x") == Environment.ExpandEnvironmentVariables(@"%SystemRoot%\system32\svchost.exe"),
+            "Environment variables in the service path must be expanded");
+        Check(Parse(null) == "" && Parse("   ") == "", "Empty service path must not crash");
+
+        // WARP, установленный на другой диск или в Program Files (x86), больше не остаётся незамеченным
+        var folders = ((IEnumerable<string>)typeof(WarpLocator).GetMethod("KnownFolders", PrivateStatic).Invoke(null, null)).ToList();
+        Check(folders.Count > 0 && folders.All(f => f.IndexOf("Cloudflare", StringComparison.OrdinalIgnoreCase) > 0), "Candidate folders must be Cloudflare folders");
+        Check(folders.Any(f => f.EndsWith(@"Cloudflare\Cloudflare WARP")) && folders.Any(f => f.EndsWith(@"Cloudflare\Cloudflare One Client")),
+            "Both product names must be searched");
+        Check(folders.Distinct(StringComparer.OrdinalIgnoreCase).Count() == folders.Count, "Candidate folders must not repeat");
+        string x86 = Environment.GetEnvironmentVariable("ProgramFiles(x86)");
+        if (x86 != null) Check(folders.Any(f => f.StartsWith(x86, StringComparison.OrdinalIgnoreCase)), "Program Files (x86) must be searched");
+        foreach (var drive in DriveInfo.GetDrives().Where(d => d.DriveType == DriveType.Fixed && d.IsReady))
+            Check(folders.Any(f => f.StartsWith(drive.Name, StringComparison.OrdinalIgnoreCase)), "Drive must be searched: " + drive.Name);
+
+        // настоящий поиск только читает реестр и файлы: не падает и объясняет, что проверял
+        var real = WarpLocator.Find();
+        Check(real.Report.Count > 0, "The search must report what it checked");
+        Check(real.CliPath == null || File.Exists(real.CliPath), "A found warp-cli must exist");
+
+        // Warp запоминает результат и умеет искать заново (WARP могли поставить уже после запуска Zarp)
+        SetFinder(Missing);
+        var warp = new Warp();
+        Check(!warp.Installed && warp.LastSearch.Report.Count == 1, "Missing WARP must be reported");
+        SetFinder(() => Found(@"C:\Fake\warp-cli.exe"));
+        warp.Locate();
+        Check(warp.Installed && warp.CliPath == @"C:\Fake\warp-cli.exe", "Locate must pick up a WARP installed later");
+        SetFinder(Missing);
+    }
+
+    static void TestWarpInstaller()
+    {
+        bool Signer(string subject) => (bool)typeof(WarpInstaller).GetMethod("IsCloudflareSigner", PrivateStatic).Invoke(null, new object[] { subject });
+        Check(Signer("CN=\"Cloudflare, Inc.\", O=\"Cloudflare, Inc.\", L=San Francisco, S=California, C=US"), "Real Cloudflare certificate subject");
+        Check(Signer("CN=x, O=Cloudflare, Inc., C=US"), "Unquoted organization");
+        Check(!Signer("CN=Cloudflare, Inc., O=Evil Corp, C=US"), "A Cloudflare name outside O= must not count");
+        Check(!Signer("CN=a, O=Not Cloudflare, Inc., C=US"), "A longer organization name must not count");
+        Check(!Signer("O=Cloudflare, Inc.x"), "Trailing characters must not count");
+        Check(!Signer("CN=Microsoft Windows, O=Microsoft Corporation, C=US") && !Signer("") && !Signer(null), "Other signers and empty subjects");
+
+        var interpret = typeof(WarpInstaller).GetMethod("InterpretMsiExit", PrivateStatic);
+        WarpInstaller.MsiResult Exit(int code) => (WarpInstaller.MsiResult)interpret.Invoke(null, new object[] { code });
+        Check(Exit(0) == WarpInstaller.MsiResult.Installed, "msiexec 0 is success");
+        Check(Exit(3010) == WarpInstaller.MsiResult.RestartNeeded && Exit(1641) == WarpInstaller.MsiResult.RestartNeeded, "Restart codes");
+        Check(Exit(1638) == WarpInstaller.MsiResult.AlreadyInstalled, "1638: this or a newer version is already installed");
+        foreach (int code in new[] { 1602, 1603, 1618, 1625, 1 })
+            Check(Exit(code) == WarpInstaller.MsiResult.Failed, "msiexec " + code + " is a failure");
+
+        // установщик, положенный вручную (если сайт Cloudflare заблокирован)
+        string dir = Path.Combine(_data, "manual");
+        Directory.CreateDirectory(dir);
+        string FindManual() => (string)typeof(WarpInstaller).GetMethod("FindManualInstaller", PrivateStatic).Invoke(null, new object[] { dir });
+        Check(FindManual() == null, "No manual installer in an empty folder");
+        File.WriteAllText(Path.Combine(dir, "notes.msi"), "x");
+        File.WriteAllText(Path.Combine(dir, "Cloudflare_WARP.exe"), "x");
+        Check(FindManual() == null, "Only Cloudflare_WARP*.msi counts as a manual installer");
+        string old = Path.Combine(dir, "Cloudflare_WARP_2025.msi");
+        File.WriteAllText(old, "x");
+        File.SetLastWriteTimeUtc(old, DateTime.UtcNow.AddDays(-5));
+        string fresh = Path.Combine(dir, "Cloudflare_WARP.msi");
+        File.WriteAllText(fresh, "x");
+        Check(FindManual() == fresh, "The newest manual installer must win");
+
+        // подпись проверяется по-настоящему: чужая и отсутствующая отвергаются, файл остаётся открытым на чтение
+        Task<string> Verify(string file) => (Task<string>)typeof(WarpInstaller).GetMethod("VerifySignatureAsync", PrivateStatic).Invoke(null, new object[] { file });
+        string cmd = Path.Combine(Environment.SystemDirectory, "cmd.exe");
+        var microsoft = Catch(() => Sync(() => Verify(cmd)));
+        Check(microsoft != null && microsoft.Message.Contains("Microsoft"), "A file signed by someone else must be rejected: " + microsoft?.Message);
+        string unsigned = Assembly.GetExecutingAssembly().Location;
+        using (new FileStream(unsigned, FileMode.Open, FileAccess.Read, FileShare.Read)) // как во время настоящей установки
+        {
+            var none = Catch(() => Sync(() => Verify(unsigned)));
+            Check(none != null && none.Message.Contains("NotSigned"), "An unsigned file must be rejected: " + none?.Message);
+        }
+    }
+
+    static void TestWarpDownload()
+    {
+        var payload = new byte[700 * 1024];
+        new Random(42).NextBytes(payload);
+        string expected;
+        using (var sha = System.Security.Cryptography.SHA256.Create()) expected = string.Concat(sha.ComputeHash(payload).Select(b => b.ToString("x2")));
+
+        var download = typeof(WarpInstaller).GetMethod("DownloadAsync", PrivateStatic);
+        var withRetry = typeof(WarpInstaller).GetMethod("DownloadWithRetryAsync", PrivateStatic);
+        string file = Path.Combine(_data, "download.bin");
+        using (var server = new FakeServer(payload))
+        {
+            string Get(MethodInfo method, string path, long min = 100 * 1024, long max = 10 << 20, double stallSeconds = 5,
+                List<int> percent = null, CancellationToken ct = default(CancellationToken)) =>
+                Sync(() => (Task<string>)method.Invoke(null, new object[]
+                {
+                    server.Url(path), file, min, max, TimeSpan.FromSeconds(stallSeconds),
+                    percent == null ? null : new SyncProgress<int>(percent.Add), ct,
+                }));
+
+            var steps = new List<int>();
+            Check(Get(download, "/ok", percent: steps) == expected, "The reported SHA-256 must match the data");
+            Check(File.ReadAllBytes(file).SequenceEqual(payload), "The file on disk must match the data");
+            Check(steps.Count > 1 && steps.Last() == 100 && steps.SequenceEqual(steps.OrderBy(p => p)), "Progress must grow monotonically up to 100%");
+            File.Delete(file);
+            Check(Get(download, "/redirect") == expected, "Redirects must be followed");
+
+            var missing = Catch(() => Get(download, "/missing"));
+            Check(missing != null && missing.Message == L.T("err.warpHttp", 404), "HTTP 404 must be reported: " + missing?.Message);
+            var broken = Catch(() => Get(download, "/server-error"));
+            Check(broken != null && broken.Message.Contains("500"), "HTTP 500 must be reported: " + broken?.Message);
+            var tiny = Catch(() => Get(download, "/tiny"));
+            Check(tiny != null && tiny.Message == L.T("err.warpSize", 100), "A too small installer must be rejected: " + tiny?.Message);
+            var huge = Catch(() => Get(download, "/ok", max: 100 * 1024));
+            Check(huge != null && huge.Message == L.T("err.warpSize", payload.Length), "A too large installer must be rejected: " + huge?.Message);
+            Check(Catch(() => Get(download, "/truncated")) != null, "A connection cut mid-download must be an error");
+
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            var stalled = Catch(() => Get(download, "/stall", stallSeconds: 1));
+            Check(stalled != null && stalled.Message == L.T("err.warpStalled") && clock.Elapsed.TotalSeconds < 10,
+                "A stalled download must fail with the stall message within seconds: " + stalled?.Message);
+
+            using (var cts = new CancellationTokenSource())
+            {
+                cts.CancelAfter(400);
+                clock.Restart();
+                var cancelled = Catch(() => Get(download, "/stall", stallSeconds: 30, ct: cts.Token));
+                Check(cancelled is OperationCanceledException && clock.Elapsed.TotalSeconds < 10, "Cancelling must interrupt a stalled download: " + cancelled?.GetType().Name);
+            }
+
+            // отказ сервера не повторяется (повторы заняли бы секунды), обрыв соединения повторяется
+            clock.Restart();
+            Check(Catch(() => Get(withRetry, "/missing")) != null && clock.Elapsed.TotalSeconds < 5, "HTTP 404 must not be retried");
+        }
+    }
+
+    /// <summary>Крошечная программа вместо warp-cli.exe: завершается с нужным кодом, что бы ей ни передали.</summary>
+    static string MakeFakeCli(string folder, int exitCode)
+    {
+        Directory.CreateDirectory(folder);
+        string path = Path.Combine(folder, "warp-cli.exe");
+        var result = new Microsoft.CSharp.CSharpCodeProvider().CompileAssemblyFromSource(
+            new System.CodeDom.Compiler.CompilerParameters { GenerateExecutable = true, OutputAssembly = path },
+            "static class P { static int Main() { return " + exitCode + "; } }");
+        if (result.Errors.HasErrors) throw new Exception("Could not build the fake warp-cli: " + result.Errors[0]);
+        return path;
+    }
+
+    static void TestEnsureWarp()
+    {
+        string cliOk = MakeFakeCli(Path.Combine(_data, "fake-ok"), 0);
+        string cliDead = MakeFakeCli(Path.Combine(_data, "fake-dead"), 1);
+        var ensure = typeof(Engine).GetMethod("EnsureWarpAsync", PrivateInstance);
+        bool Ensure(Engine e) => Sync(() => (Task<bool>)ensure.Invoke(e, new object[] { CancellationToken.None }));
+        var installField = typeof(Engine).GetField("InstallWarp", PrivateInstance);
+        var readyField = typeof(Engine).GetField("WarpReadyTimeoutMs", PrivateInstance);
+        void Install(Engine e, Func<IProgress<WarpStep>, CancellationToken, Task> install) => installField.SetValue(e, install);
+        Task Nothing(IProgress<WarpStep> p, CancellationToken ct) => Task.CompletedTask;
+
+        try
+        {
+            // WARP на месте: ничего не спрашивается и не ставится
+            SetFinder(() => Found(cliOk));
+            var engine = NewEngine();
+            int asked = 0, installed = 0;
+            engine.AskInstallWarp = () => { asked++; return true; };
+            Install(engine, (p, ct) => { installed++; return Task.CompletedTask; });
+            Check(Ensure(engine) && asked == 0 && installed == 0 && engine.Warp.CliPath == cliOk, "Installed WARP must be used without asking");
+
+            // WARP нет, спросить некого или пользователь отказался
+            SetFinder(Missing);
+            engine = NewEngine();
+            Install(engine, (p, ct) => { installed++; return Task.CompletedTask; });
+            Check(!Ensure(engine) && installed == 0 && engine.State == EngineState.Idle && engine.Detail == L.T("detail.noWarp"),
+                "Without a way to ask, nothing is installed");
+            engine.AskInstallWarp = () => { asked++; return false; };
+            Check(!Ensure(engine) && asked == 1 && installed == 0 && engine.Detail == L.T("detail.noWarp"), "A declined installation must not install anything");
+
+            // согласие: установщик запущен, WARP появился, служба отвечает
+            asked = installed = 0;
+            engine.AskInstallWarp = () => { asked++; return true; };
+            Install(engine, (p, ct) =>
+            {
+                installed++;
+                p.Report(new WarpStep(new Msg("progress.warpDownloading", 50), 50));
+                SetFinder(() => Found(cliOk)); // установщик «поставил» WARP
+                return Task.CompletedTask;
+            });
+            bool ready = Ensure(engine);
+            Thread.Sleep(200); // дать запоздавшему отчёту о ходе загрузки дойти: он не должен вернуть полосу
+            Check(ready && asked == 1 && installed == 1, "An accepted installation must ask once and install once");
+            Check(engine.Warp.CliPath == cliOk, "After installing, the new WARP must be found");
+            Check(engine.ProgressTotal == 0, "A late progress report must not bring the download bar back");
+
+            // сбой установки (подпись, сеть, код msiexec): понятная ошибка, WARP не появился
+            SetFinder(Missing);
+            engine = NewEngine();
+            engine.AskInstallWarp = () => true;
+            Install(engine, (p, ct) => { throw new Exception("signature check failed"); });
+            Check(!Ensure(engine) && engine.State == EngineState.Idle && engine.Detail == L.T("detail.warpInstallFailed"), "A failed installation must be reported");
+
+            // установщик отработал, но warp-cli так и не найден
+            Install(engine, Nothing);
+            Check(!Ensure(engine) && engine.Detail == L.T("detail.warpInstallFailed"), "An installer that leaves no WARP behind must be reported");
+
+            // WARP установлен, но служба не отвечает
+            readyField.SetValue(engine, 1500);
+            Install(engine, (p, ct) => { SetFinder(() => Found(cliDead)); return Task.CompletedTask; });
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            Check(!Ensure(engine) && engine.Detail == L.T("detail.warpInstallFailed") && clock.Elapsed.TotalSeconds < 30, "A service that never answers must be reported");
+
+            // отмена не превращается в «ошибку установки»
+            SetFinder(Missing);
+            typeof(Warp).GetField("<CliPath>k__BackingField", PrivateInstance).SetValue(engine.Warp, null); // прошлый шаг оставил путь
+            Install(engine, (p, ct) => { throw new OperationCanceledException(); });
+            Check(Catch(() => Ensure(engine)) is OperationCanceledException, "Cancelling must pass through");
+        }
+        finally
+        {
+            SetFinder(Missing);
+        }
+    }
+
+    static void TestInstallHint()
+    {
+        var engine = NewEngine();
+        using (var main = NewMain(engine))
+        {
+            var hint = (Label)main.GetType().GetField("_hint", PrivateInstance).GetValue(main);
+            Check(hint.Text == L.T("hint.installWarp"), "Without WARP the hint must say Zarp will install it: " + hint.Text);
+            typeof(Warp).GetField("<CliPath>k__BackingField", PrivateInstance).SetValue(engine.Warp, @"C:\Fake\warp-cli.exe");
+            main.GetType().GetMethod("UpdateUi", PrivateInstance).Invoke(main, null);
+            Check(hint.Text == L.T("hint.firstRun"), "With WARP present the usual first-run hint returns: " + hint.Text);
+        }
+    }
+
+    sealed class SyncProgress<T> : IProgress<T>
+    {
+        readonly Action<T> _action;
+        public SyncProgress(Action<T> action) { _action = action; }
+        public void Report(T value) => _action(value);
+    }
+
+    /// <summary>Минимальный HTTP-сервер на localhost: ответы, редирект, ошибки, обрыв и зависание.</summary>
+    sealed class FakeServer : IDisposable
+    {
+        readonly System.Net.Sockets.TcpListener _listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        readonly ManualResetEvent _stop = new ManualResetEvent(false);
+        readonly byte[] _payload;
+
+        public FakeServer(byte[] payload)
+        {
+            _payload = payload;
+            _listener.Start();
+            new Thread(Accept) { IsBackground = true }.Start();
+        }
+
+        string Base => "http://127.0.0.1:" + ((IPEndPoint)_listener.LocalEndpoint).Port;
+        public string Url(string path) => Base + path;
+
+        void Accept()
+        {
+            try
+            {
+                while (true)
+                {
+                    var client = _listener.AcceptTcpClient();
+                    new Thread(() => Handle(client)) { IsBackground = true }.Start();
+                }
+            }
+            catch { } // сервер остановлен
+        }
+
+        void Handle(System.Net.Sockets.TcpClient client)
+        {
+            try
+            {
+                using (client)
+                {
+                    var stream = client.GetStream();
+                    stream.ReadTimeout = 5000;
+                    var request = new System.Text.StringBuilder();
+                    var one = new byte[1];
+                    while (!request.ToString().EndsWith("\r\n\r\n") && stream.Read(one, 0, 1) == 1) request.Append((char)one[0]);
+                    string path = request.ToString().Split('\n')[0].Split(' ')[1];
+
+                    void Headers(string status, long length, string extra = "")
+                    {
+                        var head = System.Text.Encoding.ASCII.GetBytes(
+                            "HTTP/1.1 " + status + "\r\nContent-Length: " + length + "\r\nContent-Type: application/octet-stream\r\nConnection: close\r\n" + extra + "\r\n");
+                        stream.Write(head, 0, head.Length);
+                    }
+
+                    switch (path)
+                    {
+                        case "/ok":
+                            Headers("200 OK", _payload.Length);
+                            stream.Write(_payload, 0, _payload.Length);
+                            break;
+                        case "/redirect":
+                            Headers("302 Found", 0, "Location: " + Url("/ok") + "\r\n");
+                            break;
+                        case "/missing":
+                            Headers("404 Not Found", 0);
+                            break;
+                        case "/server-error":
+                            Headers("500 Internal Server Error", 0);
+                            break;
+                        case "/tiny":
+                            Headers("200 OK", 100);
+                            stream.Write(_payload, 0, 100);
+                            break;
+                        case "/truncated":
+                            Headers("200 OK", _payload.Length);
+                            stream.Write(_payload, 0, _payload.Length / 2);
+                            break; // соединение закрывается раньше времени
+                        case "/stall":
+                            Headers("200 OK", _payload.Length);
+                            stream.Write(_payload, 0, 100 * 1024);
+                            stream.Flush();
+                            _stop.WaitOne(30000); // дальше ни байта
+                            break;
+                    }
+                }
+            }
+            catch { } // клиент оборвал соединение
+        }
+
+        public void Dispose()
+        {
+            _stop.Set();
+            _listener.Stop();
+        }
     }
 
     static void TestExitDuringPrompt()

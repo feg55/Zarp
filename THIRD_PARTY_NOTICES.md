@@ -16,4 +16,4 @@ The complete corresponding source code of WinDivert and Cygwin is available from
 
 The same notices and license texts ship inside `Zarp.exe` and are written to `%LOCALAPPDATA%\Zarp\licenses` (Settings → Licenses).
 
-Cloudflare and WARP are trademarks of Cloudflare, Inc. Zarp is an independent project, not affiliated with or endorsed by Cloudflare. It does not include any Cloudflare software and only controls a separately installed WARP client through `warp-cli`.
+Cloudflare and WARP are trademarks of Cloudflare, Inc. Zarp is an independent project, not affiliated with or endorsed by Cloudflare. Zarp does not include or redistribute any Cloudflare software. It only controls the WARP client through `warp-cli`; when the client is missing, Zarp can download the official installer directly from Cloudflare on the user's request and checks its Cloudflare signature before running it.

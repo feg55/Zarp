@@ -78,6 +78,14 @@ namespace Zarp.Core
             finally { CloseHandle(h); }
         }
 
+        /// <summary>
+        /// Полный путь к системной программе. Голое имя ищется сначала рядом с Zarp.exe,
+        /// а Zarp запущен от администратора: подложенный рядом msiexec.exe или powershell.exe получил бы эти права.
+        /// </summary>
+        public static string SystemExe(string name) => Path.Combine(Environment.SystemDirectory, name);
+
+        public static string PowerShellExe => Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
+
         public static bool SamePath(string a, string b)
         {
             try { return string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase); }

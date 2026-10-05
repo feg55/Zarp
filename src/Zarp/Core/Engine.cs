@@ -31,8 +31,15 @@ namespace Zarp.Core
         public Func<string, bool> AskAntivirusExclusion;
         /// <summary>Найден сторонний VPN. Возвращает true, если всё равно продолжать.</summary>
         public Func<List<string>, bool> AskContinueWithVpn;
+        /// <summary>Cloudflare WARP не найден. Возвращает true, если пользователь разрешил скачать и установить его.</summary>
+        public Func<bool> AskInstallWarp;
+        /// <summary>Установка WARP. Подменяется в тестах, чтобы они ничего не скачивали и не ставили.</summary>
+        internal Func<IProgress<WarpStep>, CancellationToken, Task> InstallWarp;
+        /// <summary>Сколько ждать запуска службы WARP после установки.</summary>
+        internal int WarpReadyTimeoutMs = 90000;
 
         CancellationTokenSource _cts;
+        volatile bool _warpReporting;
         readonly SemaphoreSlim _busy = new SemaphoreSlim(1, 1);
         volatile bool _stopping;
         Task _shutdownTask;
@@ -45,6 +52,7 @@ namespace Zarp.Core
             try { if (!File.Exists(cfg) && File.Exists(legacy)) File.Move(legacy, cfg); } catch { }
             Config = AppConfig.Load(cfg);
             Zapret = new Zapret(Path.Combine(dataDir, "zapret2"));
+            InstallWarp = (progress, ct) => WarpInstaller.InstallAsync(DataDir, progress, ct);
             ReloadStrategies();
 
             // результаты старых наборов стратегий больше не нужны: id сменились, и тесты были без перепроверки
@@ -144,7 +152,14 @@ namespace Zarp.Core
             // распаковать вшитый zapret2 заранее, чтобы первое подключение не ждало; ошибки (антивирус) разберёт PrepareAsync
             try { Zapret.ExtractEmbedded(); }
             catch (Exception e) { Log.Write(L.T("log.notExtracted", e.Message)); }
-            if (!Warp.Installed) { Set(EngineState.Idle, M("detail.noWarp")); return; }
+            if (!Warp.Installed)
+            {
+                // отчёт о поиске сразу в журнале: по нему видно, почему WARP не найден, не дожидаясь нажатия кнопки
+                Log.Write(L.T("log.warpMissing", string.Join("; ", Warp.LastSearch?.Report ?? new List<string>())));
+                Set(EngineState.Idle, M("detail.noWarp"));
+                return;
+            }
+            Log.Write(L.T("log.warpFound", Warp.CliPath));
             var (status, _) = await Warp.StatusAsync();
             if (status == "Connected")
                 Set(EngineState.Connected, DescribeSelected());
@@ -277,15 +292,66 @@ namespace Zarp.Core
 
         // ------------------------------------------------------------------ шаги
 
-        async Task<bool> PrepareAsync(CancellationToken ct)
+        /// <summary>
+        /// Убедиться, что Cloudflare WARP есть. Если его нет, предложить скачать и установить официальный клиент.
+        /// Возвращает true, когда warp-cli найден и служба WARP отвечает.
+        /// </summary>
+        internal async Task<bool> EnsureWarpAsync(CancellationToken ct)
         {
-            Set(EngineState.Preparing, M("detail.preparing"));
-            if (!Warp.Installed)
+            if (Warp.Installed) return true;
+            var search = Warp.Locate(); // WARP могли поставить уже после запуска Zarp
+            if (Warp.Installed) return true;
+
+            Log.Write(L.T("log.warpMissing", string.Join("; ", search.Report)));
+            if (AskInstallWarp == null || !AskInstallWarp())
             {
                 Log.Write(L.T("log.noWarpCli"));
                 Set(EngineState.Idle, M("detail.noWarp"));
                 return false;
             }
+
+            try
+            {
+                Set(EngineState.Preparing, M("progress.warpDownloading", 0));
+                // Progress<T> доставляет отчёты с задержкой: запоздавший отчёт не должен вернуть полосу загрузки
+                // и старый текст после того, как установка уже закончилась.
+                _warpReporting = true;
+                var progress = new Progress<WarpStep>(step =>
+                {
+                    if (!_warpReporting) return;
+                    ProgressTotal = step.Percent >= 0 ? 100 : 0;
+                    ProgressDone = Math.Max(0, step.Percent);
+                    SetDetail(step.Message);
+                });
+                try { await InstallWarp(progress, ct); }
+                finally { _warpReporting = false; }
+
+                var after = Warp.Locate(); // после установки warp-cli должен найтись
+                if (!Warp.Installed)
+                    throw new Exception(L.T("log.warpMissing", string.Join("; ", after.Report)));
+                Log.Write(L.T("log.warpInstalled", Warp.CliPath));
+
+                ProgressTotal = 0;
+                Set(EngineState.Preparing, M("progress.warpStarting"));
+                if (!await Warp.WaitReadyAsync(WarpReadyTimeoutMs, ct))
+                    throw new Exception(L.T("err.warpNotReady"));
+                return true;
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception e)
+            {
+                ProgressTotal = 0;
+                Log.Write(L.T("log.warpInstallFailed", e.Message));
+                Log.Write(L.T("log.warpManual", DataDir));
+                Set(EngineState.Idle, M("detail.warpInstallFailed"));
+                return false;
+            }
+        }
+
+        async Task<bool> PrepareAsync(CancellationToken ct)
+        {
+            Set(EngineState.Preparing, M("detail.preparing"));
+            if (!await EnsureWarpAsync(ct)) return false;
             if (!Zapret.Installed || Zapret.EmbeddedIsNewer)
             {
                 if (!await InstallZapretAsync(ct) && !Zapret.Installed) return false;

@@ -364,7 +364,7 @@ namespace Zarp.Core
         {
             Directory.CreateDirectory(Dir);
             string cmd = $"-NoProfile -NonInteractive -Command \"Add-MpPreference -ExclusionPath '{Dir.Replace("'", "''")}'\"";
-            var r = await ProcessUtil.RunAsync("powershell.exe", cmd, 30000);
+            var r = await ProcessUtil.RunAsync(ProcessUtil.PowerShellExe, cmd, 30000);
             Log.Write(r.Ok ? L.T("log.defenderAdded", Dir) : L.T("log.defenderFailed", r.Output));
             return r.Ok;
         }

@@ -15,35 +15,50 @@ namespace Zarp.Core
     /// <summary>Управление клиентом Cloudflare WARP через warp-cli.</summary>
     public sealed class Warp
     {
-        public string CliPath { get; }
+        public string CliPath { get; private set; }
         public bool Installed => CliPath != null;
+        /// <summary>Результат последнего поиска warp-cli: по нему видно, где искали.</summary>
+        public WarpLocator.Result LastSearch { get; private set; }
+
+        /// <summary>Подмена поиска в тестах: они не должны находить и запускать настоящий WARP.</summary>
+        internal static Func<WarpLocator.Result> Finder = WarpLocator.Find;
 
         // последний выставленный транспорт - чтобы не дёргать настройки WARP без нужды
         WarpTransport? _transport;
 
         public Warp()
         {
-            CliPath = FindCli();
+            Locate();
         }
 
-        static string FindCli()
+        /// <summary>Искать warp-cli заново: WARP могли установить уже после запуска Zarp.</summary>
+        public WarpLocator.Result Locate()
         {
-            foreach (var root in new[] { Environment.GetEnvironmentVariable("ProgramW6432"), Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles) })
+            var result = Finder();
+            CliPath = result.CliPath;
+            return LastSearch = result;
+        }
+
+        /// <summary>
+        /// Ждать, пока служба WARP начнёт отвечать. Сразу после установки она ещё стартует,
+        /// и первые вызовы warp-cli заканчиваются ошибкой «daemon is not running».
+        /// </summary>
+        public async Task<bool> WaitReadyAsync(int timeoutMs, CancellationToken ct)
+        {
+            var sw = Stopwatch.StartNew();
+            bool serviceStarted = false;
+            while (sw.ElapsedMilliseconds < timeoutMs)
             {
-                if (string.IsNullOrEmpty(root)) continue;
-                string p = Path.Combine(root, "Cloudflare", "Cloudflare WARP", "warp-cli.exe");
-                if (File.Exists(p)) return p;
-            }
-            foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(';'))
-            {
-                try
+                ct.ThrowIfCancellationRequested();
+                if ((await Cli("status", 8000)).Ok) return true;
+                if (!serviceStarted && sw.ElapsedMilliseconds > 15000)
                 {
-                    string p = Path.Combine(dir.Trim(), "warp-cli.exe");
-                    if (File.Exists(p)) return p;
+                    serviceStarted = true; // служба с отложенным запуском: подтолкнуть один раз
+                    await ProcessUtil.RunAsync(ProcessUtil.SystemExe("sc.exe"), "start CloudflareWARP", 15000);
                 }
-                catch { }
+                await Task.Delay(1000, ct);
             }
-            return null;
+            return false;
         }
 
         public Task<RunResult> Cli(string args, int timeoutMs = 15000) =>

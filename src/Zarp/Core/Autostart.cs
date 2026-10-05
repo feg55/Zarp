@@ -15,7 +15,7 @@ namespace Zarp.Core
         const string TaskName = "Zarp";
 
         public static async Task<bool> IsEnabledAsync() =>
-            (await ProcessUtil.RunAsync("schtasks.exe", $"/Query /TN \"{TaskName}\"", 10000)).Ok;
+            (await ProcessUtil.RunAsync(ProcessUtil.SystemExe("schtasks.exe"), $"/Query /TN \"{TaskName}\"", 10000)).Ok;
 
         public static async Task<bool> SetAsync(bool enable, string exePath)
         {
@@ -26,12 +26,12 @@ namespace Zarp.Core
                 string xml = TaskXml(exePath);
                 string tmp = Path.Combine(Path.GetTempPath(), "zarp-task.xml");
                 File.WriteAllText(tmp, xml, Encoding.Unicode);
-                r = await ProcessUtil.RunAsync("schtasks.exe", $"/Create /F /TN \"{TaskName}\" /XML \"{tmp}\"", 10000);
+                r = await ProcessUtil.RunAsync(ProcessUtil.SystemExe("schtasks.exe"), $"/Create /F /TN \"{TaskName}\" /XML \"{tmp}\"", 10000);
                 try { File.Delete(tmp); } catch { }
             }
             else
             {
-                r = await ProcessUtil.RunAsync("schtasks.exe", $"/Delete /F /TN \"{TaskName}\"", 10000);
+                r = await ProcessUtil.RunAsync(ProcessUtil.SystemExe("schtasks.exe"), $"/Delete /F /TN \"{TaskName}\"", 10000);
             }
             Log.Write(r.Ok
                 ? L.T(enable ? "log.autostartOn" : "log.autostartOff")

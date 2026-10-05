@@ -10,7 +10,7 @@ One-click Cloudflare WARP for networks that block it. Zarp finds a [zapret2](htt
 
 | Platform | Download | Requirements |
 |---|---|---|
-| **Windows** | [**Zarp.exe**](https://github.com/feg55/Zarp/releases/latest/download/Zarp.exe) · [all releases](https://github.com/feg55/Zarp/releases) | Windows 10/11 x64, [Cloudflare WARP](https://one.one.one.one/), administrator rights |
+| **Windows** | [**Zarp.exe**](https://github.com/feg55/Zarp/releases/latest/download/Zarp.exe) · [all releases](https://github.com/feg55/Zarp/releases) | Windows 10/11 x64, administrator rights. [Cloudflare WARP](https://one.one.one.one/) is installed by Zarp if it is missing |
 | **Android** | [**APK**](https://github.com/feg55/Zarp-Android/releases/latest) · [source](https://github.com/feg55/Zarp-Android) | Android 8.0+, no root, no WARP app needed |
 
 [![Windows release](https://img.shields.io/github/v/release/feg55/Zarp?label=Windows)](https://github.com/feg55/Zarp/releases/latest)
@@ -24,7 +24,7 @@ One-click Cloudflare WARP for networks that block it. Zarp finds a [zapret2](htt
 - **Built for WARP.** Strategies target the WARP handshake only: MASQUE over QUIC, WireGuard and the MASQUE HTTP/2 fallback.
 - **Honest testing.** Each test runs against a fresh WARP endpoint and every candidate is verified twice. A strategy that only passed thanks to a previous connection is thrown out.
 - **Self-healing.** If the saved strategy stops working, Zarp tries the other verified ones before searching again.
-- **Zero setup.** A single `Zarp.exe` with zapret2 embedded. zapret2 updates itself in the background.
+- **Zero setup.** A single `Zarp.exe` with zapret2 embedded; zapret2 updates itself in the background. If Cloudflare WARP is missing, Zarp downloads the official client from Cloudflare and installs it after you agree.
 - **Low overhead.** Only WARP addresses and handshake packets are intercepted. The tunnel itself never passes through zapret.
 - **Your language.** English, Русский, Español, Português, 中文, हिन्दी, Français and Deutsch. Zarp follows the Windows language (English if it is not on the list), and the globe button switches it on the fly.
 
@@ -41,14 +41,16 @@ Download the APK from [Releases](https://github.com/feg55/Zarp-Android/releases/
 ## Requirements
 
 - Windows 10 or 11, x64
-- [Cloudflare WARP](https://one.one.one.one/) (`winget install Cloudflare.Warp`)
 - Administrator rights (needed by the WinDivert driver)
+- [Cloudflare WARP](https://one.one.one.one/): nothing to do, Zarp installs it for you when it is missing (see below). If you already have it, Zarp finds it wherever it is installed.
 
 ## Usage
 
 1. Download [`Zarp.exe`](https://github.com/feg55/Zarp/releases/latest/download/Zarp.exe) and run it.
 2. Press the power button. The first search takes a minute or two.
 3. Done. Change the strategy any time in Settings.
+
+**No Cloudflare WARP yet?** On the first press Zarp asks whether to install it. If you agree, it downloads the official installer from Cloudflare (about 60 MB), checks that it is signed by Cloudflare, installs it silently and carries on with the search. The WARP client is proprietary software that Cloudflare licenses to you, so Zarp does not bundle it: it fetches it from Cloudflare exactly as you would in a browser, and by installing it you accept the [Cloudflare WARP terms](https://www.cloudflare.com/application/terms/). If the Cloudflare download site is blocked for you, get `Cloudflare_WARP.msi` any other way (or install WARP yourself with `winget install Cloudflare.Warp`) and put the file into `%LOCALAPPDATA%\Zarp`; Zarp verifies its signature the same way and installs it.
 
 Settings offer two searches. **Quick scan** (also used by the power button) stops after 3 working strategies; the number is adjustable. **Full scan** tests every strategy: slower, but nothing is skipped, so it finds the fastest one for sure.
 
@@ -76,6 +78,7 @@ gh attestation verify .\Zarp.exe --repo feg55/Zarp     # proves the file was bui
 
 ### What Zarp changes on your system
 
+- If Cloudflare WARP is not installed and you agree, installs it from the official Cloudflare installer (Windows Installer, `msiexec /i ... /qn`). Nothing is installed without your consent. The installer is deleted afterwards.
 - Runs as administrator. While a strategy is active, `winws2` from zapret2 loads the WinDivert driver and modifies only WARP handshake packets.
 - Changes the tunnel protocol and MASQUE options of your WARP client through `warp-cli` to match the chosen strategy. During a search it also pins a WARP endpoint for each test and resets it to automatic afterwards.
 - Extracts zapret2 and keeps its settings and log in `%LOCALAPPDATA%\Zarp`.
@@ -87,12 +90,14 @@ gh attestation verify .\Zarp.exe --repo feg55/Zarp     # proves the file was bui
 2. Choose **Exit** in the tray menu, then delete `Zarp.exe` and the `%LOCALAPPDATA%\Zarp` folder.
 3. Restore the WARP defaults: `warp-cli tunnel protocol reset`, `warp-cli tunnel masque-options reset`, `warp-cli tunnel endpoint reset`.
 4. If you added the Defender exclusion, remove it in an administrator PowerShell: `Remove-MpPreference -ExclusionPath "$env:LOCALAPPDATA\Zarp\zapret2"`.
+5. If Zarp installed Cloudflare WARP for you and you no longer need it, remove it like any program: Settings → Apps → **Cloudflare One Client** (called **Cloudflare WARP** in older versions), or `winget uninstall Cloudflare.Warp`.
 
 ### Privacy
 
 Zarp does not collect, store or send any personal data, and it has no telemetry. It makes only these network requests:
 
 - `https://www.cloudflare.com/cdn-cgi/trace`, while testing or connecting, to check that traffic goes through WARP and to measure latency.
+- `https://downloads.cloudflareclient.com/`, only if Cloudflare WARP is missing and you agreed to install it, to download the official installer.
 - `https://github.com/bol-van/zapret2/releases` (the GitHub API as a fallback), to check for and download zapret2 updates. Turn off **Update zapret2 automatically** in Settings to disable this.
 
 WARP itself is a Cloudflare service covered by the [Cloudflare WARP privacy policy](https://www.cloudflare.com/application/privacypolicy/). Requests to GitHub are covered by the [GitHub privacy statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement).
@@ -147,4 +152,4 @@ Zarp for Windows is released under the [MIT License](LICENSE). [Zarp for Android
 
 `Zarp.exe` bundles [zapret2](https://github.com/bol-van/zapret2) (MIT) with LuaJIT (MIT) and zlib, [WinDivert](https://reqrypt.org/windivert.html) (LGPL-3.0) and the Cygwin DLL (LGPL-3.0-or-later). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for versions, license texts and source links.
 
-Cloudflare and WARP are trademarks of Cloudflare, Inc. Zarp is an independent project, not affiliated with or endorsed by Cloudflare. It does not ship any Cloudflare software and only drives the WARP client you install yourself.
+Cloudflare and WARP are trademarks of Cloudflare, Inc. Zarp is an independent project, not affiliated with or endorsed by Cloudflare. Zarp does not bundle or redistribute any Cloudflare software: it only drives the WARP client through `warp-cli`, and when the client is missing it fetches the official installer from Cloudflare on your request.
