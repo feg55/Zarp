@@ -32,6 +32,10 @@ namespace Zarp.Core
                     StandardOutputEncoding = Encoding.UTF8,
                     StandardErrorEncoding = Encoding.UTF8,
                 };
+                // Windows PowerShell, запущенный из PowerShell 7 (так выполняются шаги на серверах GitHub),
+                // наследует его PSModulePath и не может загрузить собственные модули.
+                if (Path.GetFileName(exe).Equals("powershell.exe", StringComparison.OrdinalIgnoreCase))
+                    psi.EnvironmentVariables.Remove("PSModulePath");
                 var sb = new StringBuilder();
                 using (var p = new Process { StartInfo = psi })
                 {

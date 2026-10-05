@@ -602,11 +602,12 @@ static class Program
         File.WriteAllText(fresh, "x");
         Check(FindManual() == fresh, "The newest manual installer must win");
 
-        // разбор вывода проверки подписи на готовых строках: результат не зависит от того, какие подписи есть у файлов этой Windows
-        var parse = typeof(WarpInstaller).GetMethod("ParseSignatureOutput", PrivateStatic);
-        string Signature(string output, bool timedOut = false)
+        // решение по результату проверки на готовых данных: принимается только действительная подпись Cloudflare,
+        // и результат не зависит от того, какие подписи есть у файлов этой Windows
+        var decide = typeof(WarpInstaller).GetMethod("CheckSigner", PrivateStatic);
+        string Decide(bool trusted, string problem = null, string subject = null)
         {
-            try { return (string)parse.Invoke(null, new object[] { output, timedOut }); }
+            try { return (string)decide.Invoke(null, new object[] { new Authenticode.Result { Trusted = trusted, Problem = problem, SignerSubject = subject } }); }
             catch (TargetInvocationException e)
             {
                 // рефлексия оборачивает исключение: достаём настоящее
@@ -614,31 +615,56 @@ static class Program
                 throw;
             }
         }
-        Check(Signature("SIGNER:CN=\"Cloudflare, Inc.\", O=\"Cloudflare, Inc.\", L=San Francisco, C=US") == "Cloudflare, Inc.", "A Cloudflare signature is accepted");
-        Check(Signature("#< CLIXML\r\n<Objs Version=\"1.1.0.1\"></Objs>\r\nSIGNER:O=\"Cloudflare, Inc.\", C=US\r\n") == "Cloudflare, Inc.",
-            "PowerShell's own noise around the result must not matter");
-        var noCertificate = Catch(() => Signature("SIGNER:\r\n"));
+        const string Cloudflare = "CN=\"Cloudflare, Inc.\", O=\"Cloudflare, Inc.\", L=San Francisco, C=US";
+        Check(Decide(true, null, Cloudflare) == "Cloudflare, Inc.", "A trusted Cloudflare signature is accepted");
+        var noCertificate = Catch(() => Decide(true, null, ""));
         Check(noCertificate != null && noCertificate.Message.Contains("no signer certificate"),
-            "Valid but without a signer certificate (catalog-signed Windows files) must be rejected: " + noCertificate?.Message);
-        var microsoft = Catch(() => Signature("SIGNER:CN=Microsoft Windows, O=Microsoft Corporation, C=US"));
+            "A trusted signature without a signer certificate must be rejected: " + noCertificate?.Message);
+        var microsoft = Catch(() => Decide(true, null, "CN=Microsoft Windows, O=Microsoft Corporation, C=US"));
         Check(microsoft != null && microsoft.Message.Contains("Microsoft"), "A signature of someone else must be rejected: " + microsoft?.Message);
-        var notSigned = Catch(() => Signature("STATUS:NotSigned"));
-        Check(notSigned != null && notSigned.Message.Contains("NotSigned"), "An unsigned file must be rejected: " + notSigned?.Message);
-        var tampered = Catch(() => Signature("STATUS:HashMismatch"));
-        Check(tampered != null && tampered.Message.Contains("HashMismatch"), "A tampered file must be rejected: " + tampered?.Message);
-        Check(Catch(() => Signature("")) != null, "No answer from PowerShell must not count as a valid signature");
-        var slow = Catch(() => Signature("", timedOut: true));
-        Check(slow != null && slow.Message.Contains("timeout"), "A timeout must be reported: " + slow?.Message);
-
-        // и по-настоящему: PowerShell проверяет файл, который остаётся открытым на чтение, как при установке
-        Task<string> Verify(string file) => (Task<string>)typeof(WarpInstaller).GetMethod("VerifySignatureAsync", PrivateStatic).Invoke(null, new object[] { file });
-        string cmd = Path.Combine(Environment.SystemDirectory, "cmd.exe");
-        Check(Catch(() => Sync(() => Verify(cmd))) != null, "A Windows system file is not signed by Cloudflare and must be rejected");
-        string unsigned = Assembly.GetExecutingAssembly().Location;
-        using (new FileStream(unsigned, FileMode.Open, FileAccess.Read, FileShare.Read)) // как во время настоящей установки
+        foreach (string problem in new[] { "NotSigned", "HashMismatch", "NotTrusted", "Expired", "Revoked" })
         {
-            var none = Catch(() => Sync(() => Verify(unsigned)));
-            Check(none != null && none.Message.Contains("NotSigned"), "An unsigned file must be rejected: " + none?.Message);
+            var rejected = Catch(() => Decide(false, problem, Cloudflare)); // даже с подписью Cloudflare в субъекте
+            Check(rejected != null && rejected.Message.Contains(problem), problem + " must be rejected: " + rejected?.Message);
+        }
+        Check(Catch(() => Decide(false)) != null, "A failed check without a reason must still be rejected");
+
+        // коды WinVerifyTrust называются по-человечески
+        var describe = typeof(Authenticode).GetMethod("Describe", PrivateStatic);
+        string Describe(uint code) => (string)describe.Invoke(null, new object[] { code });
+        Check(Describe(0x800B0100) == "NotSigned" && Describe(0x80096010) == "HashMismatch" && Describe(0x800B0109) == "NotTrusted"
+              && Describe(0x800B0101) == "Expired" && Describe(0x800B010C) == "Revoked" && Describe(0x80070002) == "FileNotFound",
+            "WinVerifyTrust codes must have readable names");
+        Check(Describe(0x12345678) == "error 0x12345678", "Unknown codes are shown as hex");
+
+        // и по-настоящему, через WinVerifyTrust: неподписанный файл, как во время установки открытый на чтение
+        string unsigned = Assembly.GetExecutingAssembly().Location;
+        using (new FileStream(unsigned, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            var none = Authenticode.Verify(unsigned);
+            Check(!none.Trusted && none.Problem == "NotSigned", "An unsigned file must be reported as NotSigned even while locked for reading: " + none.Problem);
+            var refused = Catch(() => Sync(() => (Task<string>)typeof(WarpInstaller).GetMethod("VerifySignatureAsync", PrivateStatic).Invoke(null, new object[] { unsigned })));
+            Check(refused != null && refused.Message.Contains("NotSigned"), "The installer check must reject an unsigned file: " + refused?.Message);
+        }
+        Check(!Authenticode.Verify(Path.Combine(Environment.SystemDirectory, "cmd.exe")).Trusted, "A catalog-signed system file has no embedded signature for Cloudflare");
+        var missingFile = Authenticode.Verify(Path.Combine(_data, "does-not-exist.msi"));
+        Check(!missingFile.Trusted && missingFile.Problem != null, "A missing file must be rejected: " + missingFile.Problem);
+        // файл с настоящей встроенной подписью другого издателя (dotnet.exe от Microsoft): подпись действительна, но не Cloudflare
+        string dotnet = new[] { Environment.GetEnvironmentVariable("DOTNET_ROOT"), Path.Combine(Environment.GetEnvironmentVariable("ProgramFiles") ?? "", "dotnet") }
+            .Where(d => !string.IsNullOrEmpty(d)).Select(d => Path.Combine(d, "dotnet.exe")).FirstOrDefault(File.Exists);
+        if (dotnet == null)
+            Console.WriteLine("SKIP: dotnet.exe not found, the check with a third-party embedded signature was not run");
+        else
+        {
+            var other = Authenticode.Verify(dotnet);
+            if (!other.Trusted)
+                Console.WriteLine("SKIP: dotnet.exe signature is not trusted on this machine (" + other.Problem + ")");
+            else
+            {
+                Check(other.SignerSubject != null && other.SignerSubject.Contains("Microsoft"), "The signer of dotnet.exe must be read: " + other.SignerSubject);
+                var notCloudflare = Catch(() => Sync(() => (Task<string>)typeof(WarpInstaller).GetMethod("VerifySignatureAsync", PrivateStatic).Invoke(null, new object[] { dotnet })));
+                Check(notCloudflare != null && notCloudflare.Message.Contains("Microsoft"), "A valid signature of another publisher must be rejected: " + notCloudflare?.Message);
+            }
         }
     }
 

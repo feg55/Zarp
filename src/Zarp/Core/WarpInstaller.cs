@@ -130,34 +130,18 @@ namespace Zarp.Core
         // ------------------------------------------------------------------ подпись
 
         /// <summary>Подпись Authenticode должна быть действительной и принадлежать Cloudflare. Возвращает имя подписавшего.</summary>
-        internal static async Task<string> VerifySignatureAsync(string file)
-        {
-            string script =
-                "$s = Get-AuthenticodeSignature -LiteralPath '" + file.Replace("'", "''") + "'\r\n" +
-                "if ($s.Status -ne 'Valid') { Write-Output ('STATUS:' + $s.Status); exit 2 }\r\n" +
-                "Write-Output ('SIGNER:' + $s.SignerCertificate.Subject)";
-            // -EncodedCommand: путь с любыми символами не ломает разбор командной строки
-            string encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
-            var r = await ProcessUtil.RunAsync(ProcessUtil.PowerShellExe,
-                "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " + encoded, 90000);
-            return ParseSignatureOutput(r.Output, r.TimedOut);
-        }
+        internal static Task<string> VerifySignatureAsync(string file) =>
+            Task.Run(() => CheckSigner(Authenticode.Verify(file)));
 
         /// <summary>
-        /// Разбор вывода проверки подписи: нужная строка SIGNER или STATUS среди прочего вывода PowerShell.
-        /// Принимает только действительную подпись Cloudflare. Файл со статусом Valid, но без сертификата
-        /// подписавшего (так выглядят системные файлы Windows с подписью в каталоге) тоже отвергается.
+        /// Решение по результату проверки: принимается только действительная подпись Cloudflare.
+        /// Подпись без сертификата подписавшего тоже отвергается.
         /// </summary>
-        internal static string ParseSignatureOutput(string output, bool timedOut)
+        internal static string CheckSigner(Authenticode.Result result)
         {
-            string subject = null, status = null;
-            foreach (string line in (output ?? "").Split('\n').Select(l => l.Trim()))
-            {
-                if (line.StartsWith("SIGNER:")) subject = line.Substring(7);
-                else if (line.StartsWith("STATUS:")) status = line.Substring(7);
-            }
-            if (subject == null)
-                throw new Exception(L.T("err.warpSignature", status ?? (timedOut ? "timeout" : "PowerShell: " + Shorten(output))));
+            if (!result.Trusted)
+                throw new Exception(L.T("err.warpSignature", result.Problem ?? "unknown"));
+            string subject = result.SignerSubject ?? "";
             if (!IsCloudflareSigner(subject))
                 throw new Exception(L.T("err.warpSignature", subject.Trim().Length == 0 ? "no signer certificate" : Shorten(subject)));
             return "Cloudflare, Inc.";
