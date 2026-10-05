@@ -6,6 +6,8 @@
 
 One-click Cloudflare WARP for networks that block it. Zarp finds a [zapret2](https://github.com/bol-van/zapret2) strategy that gets the WARP handshake through DPI, remembers it and connects. Available for Windows and Android.
 
+![Zarp](docs/screenshot.png)
+
 ## Download
 
 | Platform | Download | Requirements |
@@ -15,8 +17,6 @@ One-click Cloudflare WARP for networks that block it. Zarp finds a [zapret2](htt
 
 [![Windows release](https://img.shields.io/github/v/release/feg55/Zarp?label=Windows)](https://github.com/feg55/Zarp/releases/latest)
 [![Android release](https://img.shields.io/github/v/release/feg55/Zarp-Android?label=Android)](https://github.com/feg55/Zarp-Android/releases/latest)
-
-![Zarp](docs/screenshot.png)
 
 ## Features
 
