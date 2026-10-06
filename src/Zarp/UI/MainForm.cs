@@ -328,6 +328,9 @@ namespace Zarp.UI
 
         void ToggleLog()
         {
+            // После ограничения размера окна Windows ClientSize может хранить запрошенную,
+            // а не фактическую высоту. Обновляем её до сохранения компактного размера.
+            if (IsHandleCreated) UpdateBounds();
             bool show = _logExpanded = !_logExpanded;
             if (show) _compactClientHeight = ClientSize.Height;
             _log.Visible = show;
@@ -339,6 +342,7 @@ namespace Zarp.UI
                 ? Math.Max(_compactClientHeight + (int)Math.Round(LogHeight * scale), _log.Bottom + (int)Math.Ceiling(20 * scale))
                 : _compactClientHeight;
             ClientSize = new Size(ClientSize.Width, height);
+            if (IsHandleCreated) UpdateBounds();
             if (show) { _log.SelectionStart = _log.TextLength; _log.ScrollToCaret(); }
         }
 

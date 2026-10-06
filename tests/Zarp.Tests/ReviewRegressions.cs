@@ -435,17 +435,80 @@ Console.WriteLine(""parent finished""); }}");
         Check(GetGuiResources(Process.GetCurrentProcess().Handle, 1) - before < 5, "Creating and disposing icons must not leak USER handles");
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    struct NativeRect
+    {
+        public int Left, Top, Right, Bottom;
+        public Size Size => new Size(Right - Left, Bottom - Top);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct MinMaxInfo
+    {
+        public Point Reserved, MaxSize, MaxPosition, MinTrackSize, MaxTrackSize;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    static extern bool GetClientRect(IntPtr handle, out NativeRect rect);
+    [DllImport("user32.dll", SetLastError = true)]
+    static extern bool GetWindowRect(IntPtr handle, out NativeRect rect);
+
+    static Size NativeClientSize(Form form)
+    {
+        if (!GetClientRect(form.Handle, out var rect))
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        return rect.Size;
+    }
+
+    static int NativeFrameHeight(Form form)
+    {
+        if (!GetWindowRect(form.Handle, out var rect))
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        return rect.Size.Height - NativeClientSize(form).Height;
+    }
+
+    // Constrain only this HWND, without changing the desktop resolution. This reproduces
+    // ClientSize caching a requested height larger than the actual window on a small CI desktop.
+    sealed class WindowHeightLimit : NativeWindow, IDisposable
+    {
+        readonly int _limit;
+        int _maximumWindowHeight;
+
+        public WindowHeightLimit(Form form, int maximumClientHeight)
+        {
+            _limit = maximumClientHeight == 0 ? int.MaxValue : maximumClientHeight + NativeFrameHeight(form);
+            _maximumWindowHeight = Math.Min(SystemInformation.MaxWindowTrackSize.Height, _limit);
+            AssignHandle(form.Handle);
+        }
+
+        public int MaximumClientHeight(Form form) => _maximumWindowHeight - NativeFrameHeight(form);
+
+        protected override void WndProc(ref Message m)
+        {
+            base.WndProc(ref m);
+            if (m.Msg != 0x0024) return; // WM_GETMINMAXINFO
+            var info = (MinMaxInfo)Marshal.PtrToStructure(m.LParam, typeof(MinMaxInfo));
+            info.MaxTrackSize.Y = Math.Min(info.MaxTrackSize.Y, _limit);
+            _maximumWindowHeight = info.MaxTrackSize.Y;
+            Marshal.StructureToPtr(info, m.LParam, false);
+        }
+
+        public void Dispose() => ReleaseHandle();
+    }
+
     static void TestLogLayout()
     {
+        foreach (int maximumClientHeight in new[] { 0, 749, 600 })
         foreach (float scale in new[] { 1f, 1.25f, 1.5f, 1.75f, 2f })
         foreach (int adjustment in new[] { 0, -100, 7 })
         using (var form = NewMain(NewEngine()))
+        using (var limit = new WindowHeightLimit(form, maximumClientHeight))
         {
             form.Scale(new SizeF(scale, scale));
             // Reproduce a compact window whose size differs from the child-control scale.
-            // The negative adjustment also covers a screen that clips the initial compact layout.
             form.ClientSize = new Size(form.ClientSize.Width, form.ClientSize.Height + adjustment);
-            var compact = form.ClientSize;
+            // ClientSize can still contain the requested height after Windows clamps the HWND.
+            var compact = NativeClientSize(form);
             var hint = GetPrivate<Label>(form, "_hint");
             var hintBounds = hint.Bounds;
             var link = GetPrivate<LinkLabel>(form, "_logToggle");
@@ -456,13 +519,23 @@ Console.WriteLine(""parent finished""); }}");
             {
                 // The log's expanded state must also work while the form is hidden in the tray.
                 if (cycle == 1) form.Hide();
+                if (cycle == 2) form.Show();
                 toggle.Invoke(form, null);
-                string context = $"scale={scale}, adjustment={adjustment}, cycle={cycle}, compact={compact}, actual={form.ClientSize}, logBottom={log.Bottom}, maxTrack={SystemInformation.MaxWindowTrackSize}";
-                Check(form.ClientSize.Height > compact.Height && log.Bottom < form.ClientSize.Height, "The expanded log fits: " + context);
+                var expanded = NativeClientSize(form);
+                int maximumHeight = limit.MaximumClientHeight(form);
+                string context = $"limit={maximumClientHeight}, scale={scale}, adjustment={adjustment}, cycle={cycle}, compact={compact}, native={expanded}, cached={form.ClientSize}, logBottom={log.Bottom}, maximumHeight={maximumHeight}";
+                // A top-level window cannot grow beyond the OS limit. Below that limit,
+                // it must grow and fit the scaled log; at the limit it must not shrink.
+                Check(expanded.Width == compact.Width &&
+                    expanded.Height >= Math.Min(maximumHeight, Math.Max(compact.Height + 1, log.Bottom + 1)),
+                    "The expanded log fits or reaches the native window limit: " + context);
+                Check(form.ClientSize == expanded, "Expanded ClientSize matches the native window: " + context);
                 Check(GetPrivate<bool>(form, "_logExpanded"), "The log is expanded: " + context);
                 toggle.Invoke(form, null);
-                context = $"scale={scale}, adjustment={adjustment}, cycle={cycle}, expected={compact}, actual={form.ClientSize}, hint={hint.Bounds}";
-                Check(form.ClientSize == compact, "Collapsing restores the actual compact size: " + context);
+                var collapsed = NativeClientSize(form);
+                context = $"limit={maximumClientHeight}, scale={scale}, adjustment={adjustment}, cycle={cycle}, expected={compact}, native={collapsed}, cached={form.ClientSize}, hint={hint.Bounds}";
+                Check(collapsed == compact, "Collapsing restores the actual compact size: " + context);
+                Check(form.ClientSize == collapsed, "Collapsed ClientSize matches the native window: " + context);
                 // Form.Scale can already clip a top-level window on a small CI desktop. The toggle
                 // must preserve its original layout, not assume that the desktop fits a 200% form.
                 Check(hint.Bounds == hintBounds && link.Bounds == linkBounds, "Toggling must not move the compact controls: " + context);
@@ -470,17 +543,24 @@ Console.WriteLine(""parent finished""); }}");
             }
         }
 
+        foreach (int maximumClientHeight in new[] { 0, 749, 600 })
+        foreach (float scale in new[] { 1.25f, 2f })
         using (var form = NewMain(NewEngine()))
         using (var reference = NewMain(NewEngine()))
+        using (var limit = new WindowHeightLimit(form, maximumClientHeight))
+        using (var referenceLimit = new WindowHeightLimit(reference, maximumClientHeight))
         {
             var compact = new Size(form.ClientSize.Width, form.ClientSize.Height + 7);
             form.ClientSize = reference.ClientSize = compact;
             var toggle = form.GetType().GetMethod("ToggleLog", PrivateInstance);
             toggle.Invoke(form, null);
-            form.Scale(new SizeF(1.25f, 1.25f));
-            reference.Scale(new SizeF(1.25f, 1.25f));
+            form.Scale(new SizeF(scale, scale));
+            reference.Scale(new SizeF(scale, scale));
             toggle.Invoke(form, null);
-            Check(form.ClientSize == reference.ClientSize, $"Scaling while the log is open preserves the scaled compact size: expected={reference.ClientSize}, actual={form.ClientSize}");
+            var expected = NativeClientSize(reference);
+            var actual = NativeClientSize(form);
+            Check(actual == expected && form.ClientSize == actual,
+                $"Scaling while the log is open preserves the scaled compact size: limit={maximumClientHeight}, scale={scale}, expected={expected}, native={actual}, cached={form.ClientSize}");
         }
     }
 
