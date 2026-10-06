@@ -33,6 +33,7 @@ namespace Zarp.UI
         Icon _iconOn, _iconOff, _iconBusy;
         bool _exiting, _exitComplete, _trayHintShown;
         bool _initialized, _initializing, _monitoring, _logExpanded;
+        int _compactClientHeight;
         CloseActionForm _closePrompt;
         const int CompactHeight = 500, LogHeight = 190;
 
@@ -328,11 +329,25 @@ namespace Zarp.UI
         void ToggleLog()
         {
             bool show = _logExpanded = !_logExpanded;
+            if (show) _compactClientHeight = ClientSize.Height;
             _log.Visible = show;
             _logToggle.Text = L.T(show ? "main.logHide" : "main.logShow");
             float scale = _power.Height / 200f;
-            ClientSize = new Size(ClientSize.Width, (int)Math.Round((CompactHeight + (show ? LogHeight : 0)) * scale));
+            // WinForms может ограничить размер формы размером экрана, не меняя масштаб дочерних контролов.
+            // Возвращаем фактическую высоту до раскрытия, а не вычисляем её заново по размеру кнопки.
+            int height = show
+                ? Math.Max(_compactClientHeight + (int)Math.Round(LogHeight * scale), _log.Bottom + (int)Math.Ceiling(20 * scale))
+                : _compactClientHeight;
+            ClientSize = new Size(ClientSize.Width, height);
             if (show) { _log.SelectionStart = _log.TextLength; _log.ScrollToCaret(); }
+        }
+
+        protected override void ScaleControl(SizeF factor, BoundsSpecified specified)
+        {
+            // Если DPI изменился при открытом журнале, масштабируем также сохранённую компактную высоту.
+            if (_logExpanded && (specified & BoundsSpecified.Height) != 0)
+                _compactClientHeight = (int)Math.Round(_compactClientHeight * factor.Height);
+            base.ScaleControl(factor, specified);
         }
 
         void AppendLog(string line)

@@ -416,14 +416,9 @@ Console.WriteLine(""parent finished""); }}");
             pending.SetResult(true); PumpUntil(() => toggle.Enabled, "Autostart update");
             Check((bool)checkedProperty.GetValue(toggle) == requested, "The switch reconciles the actual scheduler state");
         }
+        TestLogLayout();
         using (var form = NewMain(NewEngine()))
         {
-            form.Scale(new SizeF(2, 2)); int compact = form.ClientSize.Height;
-            var toggle = form.GetType().GetMethod("ToggleLog", PrivateInstance);
-            toggle.Invoke(form, null);
-            Check(form.ClientSize.Height > compact && GetPrivate<TextBox>(form, "_log").Bottom < form.ClientSize.Height, "The expanded log fits at 200% scaling");
-            toggle.Invoke(form, null);
-            Check(form.ClientSize.Height == compact && GetPrivate<Label>(form, "_hint").Bottom < compact, "Collapsing restores the scaled compact height");
             var button = GetPrivate<Button>(form, "_power"); int clicked = 0;
             GetPrivate<Engine>(form, "_engine").AskInstallWarp = () => false;
             button.Click += (s, e) => clicked++;
@@ -438,6 +433,55 @@ Console.WriteLine(""parent finished""); }}");
         int before = GetGuiResources(Process.GetCurrentProcess().Handle, 1);
         for (int i = 0; i < 32; i++) using ((Icon)create.Invoke(null, new object[] { 32, Color.Orange })) { }
         Check(GetGuiResources(Process.GetCurrentProcess().Handle, 1) - before < 5, "Creating and disposing icons must not leak USER handles");
+    }
+
+    static void TestLogLayout()
+    {
+        foreach (float scale in new[] { 1f, 1.25f, 1.5f, 1.75f, 2f })
+        foreach (int adjustment in new[] { 0, -100, 7 })
+        using (var form = NewMain(NewEngine()))
+        {
+            form.Scale(new SizeF(scale, scale));
+            // Reproduce a compact window whose size differs from the child-control scale.
+            // The negative adjustment also covers a screen that clips the initial compact layout.
+            form.ClientSize = new Size(form.ClientSize.Width, form.ClientSize.Height + adjustment);
+            var compact = form.ClientSize;
+            var hint = GetPrivate<Label>(form, "_hint");
+            var hintBounds = hint.Bounds;
+            var link = GetPrivate<LinkLabel>(form, "_logToggle");
+            var linkBounds = link.Bounds;
+            var log = GetPrivate<TextBox>(form, "_log");
+            var toggle = form.GetType().GetMethod("ToggleLog", PrivateInstance);
+            for (int cycle = 0; cycle < 3; cycle++)
+            {
+                // The log's expanded state must also work while the form is hidden in the tray.
+                if (cycle == 1) form.Hide();
+                toggle.Invoke(form, null);
+                string context = $"scale={scale}, adjustment={adjustment}, cycle={cycle}, compact={compact}, actual={form.ClientSize}, logBottom={log.Bottom}, maxTrack={SystemInformation.MaxWindowTrackSize}";
+                Check(form.ClientSize.Height > compact.Height && log.Bottom < form.ClientSize.Height, "The expanded log fits: " + context);
+                Check(GetPrivate<bool>(form, "_logExpanded"), "The log is expanded: " + context);
+                toggle.Invoke(form, null);
+                context = $"scale={scale}, adjustment={adjustment}, cycle={cycle}, expected={compact}, actual={form.ClientSize}, hint={hint.Bounds}";
+                Check(form.ClientSize == compact, "Collapsing restores the actual compact size: " + context);
+                // Form.Scale can already clip a top-level window on a small CI desktop. The toggle
+                // must preserve its original layout, not assume that the desktop fits a 200% form.
+                Check(hint.Bounds == hintBounds && link.Bounds == linkBounds, "Toggling must not move the compact controls: " + context);
+                Check(!log.Visible && !GetPrivate<bool>(form, "_logExpanded"), "The log is collapsed: " + context);
+            }
+        }
+
+        using (var form = NewMain(NewEngine()))
+        using (var reference = NewMain(NewEngine()))
+        {
+            var compact = new Size(form.ClientSize.Width, form.ClientSize.Height + 7);
+            form.ClientSize = reference.ClientSize = compact;
+            var toggle = form.GetType().GetMethod("ToggleLog", PrivateInstance);
+            toggle.Invoke(form, null);
+            form.Scale(new SizeF(1.25f, 1.25f));
+            reference.Scale(new SizeF(1.25f, 1.25f));
+            toggle.Invoke(form, null);
+            Check(form.ClientSize == reference.ClientSize, $"Scaling while the log is open preserves the scaled compact size: expected={reference.ClientSize}, actual={form.ClientSize}");
+        }
     }
 
     static void PumpUntil(Func<bool> done, string description)
