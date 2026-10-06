@@ -19,10 +19,13 @@ namespace Zarp.Core
     public static class ProcessUtil
     {
         /// <summary>Запустить консольную программу скрыто и дождаться вывода.</summary>
-        public static Task<RunResult> RunAsync(string exe, string args, int timeoutMs = 15000, CancellationToken ct = default)
+        public static async Task<RunResult> RunAsync(string exe, string args, int timeoutMs = 15000, CancellationToken ct = default)
         {
-            return Task.Run(() =>
+            ct.ThrowIfCancellationRequested();
+            if (timeoutMs <= 0) throw new ArgumentOutOfRangeException(nameof(timeoutMs));
+            using (var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct))
             {
+                deadline.CancelAfter(timeoutMs);
                 var psi = new ProcessStartInfo(exe, args)
                 {
                     UseShellExecute = false,
@@ -39,23 +42,43 @@ namespace Zarp.Core
                 var sb = new StringBuilder();
                 using (var p = new Process { StartInfo = psi })
                 {
-                    p.OutputDataReceived += (s, e) => { if (e.Data != null) lock (sb) sb.AppendLine(e.Data); };
-                    p.ErrorDataReceived += (s, e) => { if (e.Data != null) lock (sb) sb.AppendLine(e.Data); };
+                    var stdout = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    var stderr = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    var exited = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    p.OutputDataReceived += (s, e) => { if (e.Data == null) stdout.TrySetResult(true); else lock (sb) sb.AppendLine(e.Data); };
+                    p.ErrorDataReceived += (s, e) => { if (e.Data == null) stderr.TrySetResult(true); else lock (sb) sb.AppendLine(e.Data); };
+                    p.EnableRaisingEvents = true;
+                    p.Exited += (s, e) => exited.TrySetResult(true);
                     p.Start();
                     p.BeginOutputReadLine();
                     p.BeginErrorReadLine();
-                    bool exited;
-                    using (ct.Register(() => { try { p.Kill(); } catch { } }))
-                        exited = p.WaitForExit(timeoutMs);
-                    if (!exited)
+                    var complete = Task.WhenAll(exited.Task, stdout.Task, stderr.Task);
+                    var expired = Task.Delay(Timeout.Infinite, deadline.Token);
+                    if (await Task.WhenAny(complete, expired).ConfigureAwait(false) != complete)
                     {
                         try { p.Kill(); } catch { }
-                        return new RunResult { ExitCode = -1, Output = sb.ToString(), TimedOut = true };
+                        try { p.CancelOutputRead(); } catch { }
+                        try { p.CancelErrorRead(); } catch { }
+                        ct.ThrowIfCancellationRequested();
+                        lock (sb) return new RunResult { ExitCode = -1, Output = sb.ToString().Trim(), TimedOut = true };
                     }
-                    p.WaitForExit(); // дочитать асинхронный вывод
+                    ct.ThrowIfCancellationRequested();
                     lock (sb) return new RunResult { ExitCode = p.ExitCode, Output = sb.ToString().Trim() };
                 }
-            });
+            }
+        }
+
+        public static async Task WaitForExitAsync(Process process)
+        {
+            var exited = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            EventHandler handler = (s, e) => exited.TrySetResult(true);
+            process.Exited += handler;
+            try
+            {
+                process.EnableRaisingEvents = true;
+                if (!process.HasExited) await exited.Task.ConfigureAwait(false);
+            }
+            finally { process.Exited -= handler; }
         }
 
         [DllImport("kernel32.dll", SetLastError = true)]

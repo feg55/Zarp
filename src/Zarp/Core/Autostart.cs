@@ -1,7 +1,9 @@
+using System;
 using System.IO;
 using System.Security;
 using System.Security.Principal;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Zarp.Core
@@ -13,21 +15,33 @@ namespace Zarp.Core
     public static class Autostart
     {
         const string TaskName = "Zarp";
+        static readonly SemaphoreSlim Gate = new SemaphoreSlim(1, 1);
 
         public static async Task<bool> IsEnabledAsync() =>
             (await ProcessUtil.RunAsync(ProcessUtil.SystemExe("schtasks.exe"), $"/Query /TN \"{TaskName}\"", 10000)).Ok;
 
         public static async Task<bool> SetAsync(bool enable, string exePath)
         {
+            await Gate.WaitAsync();
+            try { return await SetCoreAsync(enable, exePath); }
+            finally { Gate.Release(); }
+        }
+
+        static async Task<bool> SetCoreAsync(bool enable, string exePath)
+        {
             RunResult r;
             if (enable)
             {
                 // XML, потому что через параметры schtasks нельзя снять лимит 72 часа и запрет работы от батареи
                 string xml = TaskXml(exePath);
-                string tmp = Path.Combine(Path.GetTempPath(), "zarp-task.xml");
-                File.WriteAllText(tmp, xml, Encoding.Unicode);
-                r = await ProcessUtil.RunAsync(ProcessUtil.SystemExe("schtasks.exe"), $"/Create /F /TN \"{TaskName}\" /XML \"{tmp}\"", 10000);
-                try { File.Delete(tmp); } catch { }
+                string tmp = Path.Combine(Path.GetTempPath(), "zarp-task-" + Guid.NewGuid().ToString("N") + ".xml");
+                try
+                {
+                    using (var stream = new FileStream(tmp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                    using (var writer = new StreamWriter(stream, Encoding.Unicode)) writer.Write(xml);
+                    r = await ProcessUtil.RunAsync(ProcessUtil.SystemExe("schtasks.exe"), $"/Create /F /TN \"{TaskName}\" /XML \"{tmp}\"", 10000);
+                }
+                finally { try { File.Delete(tmp); } catch { } }
             }
             else
             {

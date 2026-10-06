@@ -24,6 +24,7 @@ namespace Zarp.UI
         readonly ToolTip _tips = new ToolTip();
         readonly ContextMenuStrip _languageMenu = new ContextMenuStrip();
         readonly NotifyIcon _tray = new NotifyIcon();
+        readonly Timer _monitor = new Timer { Interval = 15000 };
         readonly ToolStripMenuItem _trayOpen = new ToolStripMenuItem();
         readonly ToolStripMenuItem _trayToggle = new ToolStripMenuItem();
         readonly ToolStripMenuItem _traySettings = new ToolStripMenuItem();
@@ -31,6 +32,7 @@ namespace Zarp.UI
 
         Icon _iconOn, _iconOff, _iconBusy;
         bool _exiting, _exitComplete, _trayHintShown;
+        bool _initialized, _initializing, _monitoring, _logExpanded;
         CloseActionForm _closePrompt;
         const int CompactHeight = 500, LogHeight = 190;
 
@@ -61,12 +63,28 @@ namespace Zarp.UI
             BuildTray();
             ApplyTexts();
 
-            _engine.Changed += () => { if (IsHandleCreated) BeginInvoke((Action)UpdateUi); };
+            _engine.Changed += OnEngineChanged;
             _engine.AskAntivirusExclusion = AskExclusion;
             _engine.AskContinueWithVpn = AskVpn;
             _engine.AskInstallWarp = AskInstallWarp;
-            Log.Line += line => { if (IsHandleCreated) BeginInvoke((Action)(() => AppendLog(line))); };
+            Log.Line += OnLogLine;
             L.Changed += ApplyTexts;
+            _monitor.Tick += async (s, e) =>
+            {
+                if (_monitoring || _exiting) return;
+                _monitoring = true;
+                try { await _engine.MonitorAsync(); }
+                finally { _monitoring = false; }
+            };
+        }
+
+        void OnEngineChanged() => QueueUi(UpdateUi);
+        void OnLogLine(string line) => QueueUi(() => AppendLog(line));
+        void QueueUi(Action action)
+        {
+            if (!IsHandleCreated || IsDisposed || Disposing) return;
+            try { BeginInvoke((Action)(() => { if (!IsDisposed && !Disposing) action(); })); }
+            catch (InvalidOperationException) { }
         }
 
         void BuildUi()
@@ -159,7 +177,7 @@ namespace Zarp.UI
             _tips.SetToolTip(_language, L.T("main.languageTip"));
             _settings.AccessibleName = L.T("main.settingsTip");
             _language.AccessibleName = L.T("main.languageTip");
-            _logToggle.Text = L.T(_log.Visible ? "main.logHide" : "main.logShow");
+            _logToggle.Text = L.T(_logExpanded ? "main.logHide" : "main.logShow");
             _trayOpen.Text = L.T("tray.open");
             _traySettings.Text = L.T("tray.settings");
             _trayExit.Text = L.T("tray.exit");
@@ -221,19 +239,26 @@ namespace Zarp.UI
         protected override async void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
+            if (_initialized || _initializing) return;
+            _initializing = true;
             UpdateUi();
             foreach (var line in StartupLog.Drain()) AppendLog(line);
             await _engine.RefreshStateAsync();
             if (_exiting || IsDisposed) return;
+            _initialized = true;
+            _initializing = false;
+            UpdateUi();
+            _monitor.Start();
             _engine.StartBackgroundUpdates();
             if (_engine.State != EngineState.Idle) return;
             // --connect: подключиться сразу (найдёт стратегию, если её ещё нет)
-            if (_connectNow || ((_autostart || _engine.Config.AutoConnectOnStart) && _engine.Selected != null))
+            if (_connectNow || (_engine.Config.AutoConnectOnStart && _engine.Selected != null))
                 await _engine.ConnectAsync();
         }
 
         async System.Threading.Tasks.Task OnPowerClick()
         {
+            if (!_initialized || _exiting) return;
             if (_engine.IsBusy)
             {
                 _engine.Cancel();
@@ -249,6 +274,7 @@ namespace Zarp.UI
         {
             var st = _engine.State;
             bool busy = _engine.IsBusy;
+            _power.Enabled = _trayToggle.Enabled = _initialized && !_exiting;
             _power.State = st == EngineState.Connected ? PowerButton.Look.On : busy ? PowerButton.Look.Busy : PowerButton.Look.Off;
 
             switch (st)
@@ -263,6 +289,8 @@ namespace Zarp.UI
                     _status.Text = L.T("status.preparing"); _status.ForeColor = Theme.Busy; break;
                 case EngineState.Disconnecting:
                     _status.Text = L.T("status.disconnecting"); _status.ForeColor = Theme.Busy; break;
+                case EngineState.Unknown:
+                    _status.Text = L.T("status.unknown"); _status.ForeColor = Theme.Bad; break;
                 default:
                     _status.Text = L.T("status.disconnected"); _status.ForeColor = Theme.Text; break;
             }
@@ -283,6 +311,7 @@ namespace Zarp.UI
             _progress.Invalidate();
 
             _trayToggle.Text = L.T(busy ? "tray.cancel" : st == EngineState.Connected ? "tray.disconnect" : "tray.connect");
+            _power.AccessibleName = _trayToggle.Text;
             _tray.Icon = st == EngineState.Connected ? _iconOn : busy ? _iconBusy : _iconOff;
             string trayText = "Zarp: " + _status.Text;
             _tray.Text = trayText.Length > 63 ? trayText.Substring(0, 63) : trayText;
@@ -298,10 +327,11 @@ namespace Zarp.UI
 
         void ToggleLog()
         {
-            bool show = !_log.Visible;
+            bool show = _logExpanded = !_logExpanded;
             _log.Visible = show;
             _logToggle.Text = L.T(show ? "main.logHide" : "main.logShow");
-            ClientSize = new Size(ClientSize.Width, CompactHeight + (show ? LogHeight : 0));
+            float scale = _power.Height / 200f;
+            ClientSize = new Size(ClientSize.Width, (int)Math.Round((CompactHeight + (show ? LogHeight : 0)) * scale));
             if (show) { _log.SelectionStart = _log.TextLength; _log.ScrollToCaret(); }
         }
 
@@ -318,10 +348,12 @@ namespace Zarp.UI
             return InvokeRequired ? (bool)Invoke(ask) : ask();
         }
 
-        bool AskVpn(System.Collections.Generic.List<string> adapters)
+        bool AskVpn(System.Collections.Generic.List<string> adapters, bool searching)
         {
-            if (_autostart && !Visible) return true; // при автозапуске не мешаем диалогами, предупреждение есть в журнале
-            Func<bool> ask = () => MessageBox.Show(this, L.T("dlg.vpn", string.Join("\n", adapters)),
+            // при автозапуске не мешаем диалогами, предупреждение есть в журнале: подключиться с выбранной стратегией можно,
+            // а подбирать новую через чужой VPN бессмысленно
+            if (_autostart && !Visible) return !searching;
+            Func<bool> ask = () => MessageBox.Show(this, L.T(searching ? "dlg.vpnSearch" : "dlg.vpn", string.Join("\n", adapters)),
                 "Zarp", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) == DialogResult.Yes;
             return InvokeRequired ? (bool)Invoke(ask) : ask();
         }
@@ -351,6 +383,15 @@ namespace Zarp.UI
 
         protected override async void OnFormClosing(FormClosingEventArgs e)
         {
+            if (e.CloseReason == CloseReason.WindowsShutDown || e.CloseReason == CloseReason.TaskManagerClosing)
+            {
+                _exiting = _exitComplete = true;
+                _monitor.Stop();
+                _engine.ShutdownForSessionEnd();
+                e.Cancel = false;
+                base.OnFormClosing(e);
+                return;
+            }
             // Не закрывать окно повторным запросом, пока выполняется отключение.
             if (_exiting)
             {
@@ -405,22 +446,29 @@ namespace Zarp.UI
         {
             if (_exiting) return;
             _exiting = true;
+            _monitor.Stop();
             if (_closePrompt != null) _closePrompt.DialogResult = DialogResult.Cancel;
             Hide();
             _tray.Visible = false;
-            if (handover)
+            try
             {
-                // winws2 и подключение принадлежат этой копии: освобождаем всё, новая копия подключится сама
-                Log.Write(L.T("log.handover"));
-                await _engine.StopForHandoverAsync();
+                if (handover)
+                {
+                    Log.Write(L.T("log.handover"));
+                    await _engine.StopForHandoverAsync();
+                }
+                else
+                {
+                    await _engine.ShutdownAsync();
+                }
             }
-            else
+            catch (Exception e) { Log.Write(L.T("log.error", e.Message)); }
+            finally
             {
-                await _engine.ShutdownAsync();
+                _exitComplete = true;
+                // Если отключение завершилось синхронно, сначала дать закончиться OnFormClosing.
+                QueueUi(Close);
             }
-            _exitComplete = true;
-            // Если отключение завершилось синхронно, сначала дать закончиться OnFormClosing.
-            BeginInvoke((Action)Close);
         }
 
         protected override void Dispose(bool disposing)
@@ -428,6 +476,13 @@ namespace Zarp.UI
             if (disposing)
             {
                 L.Changed -= ApplyTexts;
+                _engine.Changed -= OnEngineChanged;
+                Log.Line -= OnLogLine;
+                if (_engine.AskAntivirusExclusion == AskExclusion) _engine.AskAntivirusExclusion = null;
+                if (_engine.AskContinueWithVpn == AskVpn) _engine.AskContinueWithVpn = null;
+                if (_engine.AskInstallWarp == AskInstallWarp) _engine.AskInstallWarp = null;
+                _monitor.Dispose();
+                _tray.ContextMenuStrip?.Dispose();
                 _tray.Dispose();
                 _tips.Dispose();
                 _languageMenu.Dispose();

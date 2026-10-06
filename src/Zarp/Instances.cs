@@ -83,20 +83,20 @@ namespace Zarp
                 }
                 catch { }
                 // старые версии держали zapret2 рядом с exe: после принудительного закрытия их winws2 остаётся жить
-                KillWinws2Under(Path.GetDirectoryName(o.Path));
+                if (o.Legacy) KillWinws2Under(Path.GetDirectoryName(o.Path));
                 o.Process.Dispose();
             }
         }
 
         static void KillWinws2Under(string dir)
         {
-            string prefix = Path.GetFullPath(dir).TrimEnd('\\') + "\\";
+            string expected = Path.Combine(Path.GetFullPath(dir), "zapret2", "winws2.exe");
             foreach (var p in Process.GetProcessesByName("winws2"))
             {
                 using (p)
                 {
                     string path = ProcessUtil.GetProcessPath(p);
-                    if (path != null && path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    if (path != null && ProcessUtil.SamePath(path, expected))
                         try { p.Kill(); p.WaitForExit(3000); } catch { }
                 }
             }

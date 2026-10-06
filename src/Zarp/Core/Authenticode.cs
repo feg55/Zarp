@@ -21,6 +21,8 @@ namespace Zarp.Core
             public string Problem;
             /// <summary>Субъект сертификата подписавшего (CN="Cloudflare, Inc.", O=...), если подпись принята.</summary>
             public string SignerSubject;
+            /// <summary>Original DER Name from the verified signer certificate.</summary>
+            public byte[] SignerSubjectRaw;
         }
 
         static readonly Guid GenericVerifyV2 = new Guid("00AAC56B-CD44-11d0-8CC2-00C04FC295EE");
@@ -105,7 +107,7 @@ namespace Zarp.Core
                 if (code == 0)
                 {
                     result.Trusted = true;
-                    result.SignerSubject = ReadSigner(data.hWVTStateData);
+                    ReadSigner(data.hWVTStateData, result);
                 }
                 else
                 {
@@ -132,20 +134,23 @@ namespace Zarp.Core
         }
 
         /// <summary>Сертификат подписавшего (первая подпись файла) из состояния проверки.</summary>
-        static string ReadSigner(IntPtr state)
+        static void ReadSigner(IntPtr state, Result result)
         {
-            if (state == IntPtr.Zero) return null;
+            if (state == IntPtr.Zero) return;
             IntPtr provider = WTHelperProvDataFromStateData(state);
-            if (provider == IntPtr.Zero) return null;
+            if (provider == IntPtr.Zero) return;
             IntPtr signer = WTHelperGetProvSignerFromChain(provider, 0, false, 0);
-            if (signer == IntPtr.Zero) return null;
+            if (signer == IntPtr.Zero) return;
             IntPtr providerCert = WTHelperGetProvCertFromChain(signer, 0);
-            if (providerCert == IntPtr.Zero) return null;
+            if (providerCert == IntPtr.Zero) return;
             // CRYPT_PROVIDER_CERT: DWORD cbStruct, затем указатель на CERT_CONTEXT
             IntPtr certContext = Marshal.ReadIntPtr(providerCert, IntPtr.Size);
-            if (certContext == IntPtr.Zero) return null;
+            if (certContext == IntPtr.Zero) return;
             using (var cert = new X509Certificate2(certContext))
-                return cert.Subject;
+            {
+                result.SignerSubject = cert.Subject;
+                result.SignerSubjectRaw = cert.SubjectName.RawData;
+            }
         }
 
         /// <summary>Код WinVerifyTrust в короткое английское название: оно попадает в сообщение об ошибке и журнал.</summary>

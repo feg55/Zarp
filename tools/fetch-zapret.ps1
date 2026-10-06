@@ -19,8 +19,11 @@ $keep = @(
     'files/fake/quic_initial_vk_com.bin',
     'files/fake/tls_clienthello_www_google_com.bin',
     'files/fake/tls_clienthello_vk_com.bin',
+    'files/fake/tls_clienthello_gosuslugi_ru.bin',
     'files/fake/stun.bin'
 )
+# Names inside the embedded zip: binaries lose their folder, everything else keeps its path.
+$wanted = $keep | ForEach-Object { if ($_ -like 'binaries/*') { Split-Path $_ -Leaf } else { $_ } }
 
 function New-Client {
     $wc = New-Object Net.WebClient
@@ -46,8 +49,10 @@ if (Test-Path $Out) {
     $z = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $Out))
     $v = $z.GetEntry('version.txt')
     $have = if ($v) { (New-Object IO.StreamReader($v.Open())).ReadToEnd().Trim() } else { '' }
+    # an archive made for an older file list is incomplete even when the release tag is the same
+    $missing = @($wanted | Where-Object { -not $z.GetEntry($_) })
     $z.Dispose()
-    if ($have -eq $tag) { Write-Output "zapret2 $tag already in $Out"; return }
+    if ($have -eq $tag -and $missing.Count -eq 0) { Write-Output "zapret2 $tag already in $Out"; return }
 }
 
 Write-Output "Downloading zapret2 $tag ..."

@@ -109,7 +109,14 @@ namespace Zarp.UI
         public static Icon AppIcon(int size, Color color)
         {
             using (var bmp = AppImage(size, color))
-                return Icon.FromHandle(bmp.GetHicon());
+            {
+                IntPtr handle = bmp.GetHicon();
+                try { using (var borrowed = Icon.FromHandle(handle)) return (Icon)borrowed.Clone(); }
+                finally { DestroyIcon(handle); }
+            }
         }
+
+        [DllImport("user32.dll")]
+        static extern bool DestroyIcon(IntPtr handle);
     }
 }

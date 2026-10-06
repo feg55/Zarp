@@ -42,6 +42,7 @@ namespace Zarp.Core
             ["quic_vk"] = "@files/fake/quic_initial_vk_com.bin",
             ["tls_google"] = "@files/fake/tls_clienthello_www_google_com.bin",
             ["tls_vk"] = "@files/fake/tls_clienthello_vk_com.bin",
+            ["tls_gosuslugi"] = "@files/fake/tls_clienthello_gosuslugi_ru.bin",
             ["stun_fake"] = "@files/fake/stun.bin",
             ["zero64"] = "0x" + new string('0', 128),
         };
@@ -78,7 +79,7 @@ namespace Zarp.Core
         const string ReleasesApi = "https://api.github.com/repos/bol-van/zapret2/releases/latest";
         string NewDir => Dir + ".new";
         string OldDir => Dir + ".old";
-        volatile bool _downloading;
+        int _downloading;
 
         /// <summary>Версия установленного zapret2 (тег релиза) или null.</summary>
         public string Version => ReadVersion(Dir);
@@ -104,7 +105,7 @@ namespace Zarp.Core
         {
             for (int i = 1; ; i++)
             {
-                try { return await f(); }
+                try { ct.ThrowIfCancellationRequested(); return await f(); }
                 catch (HttpRequestException) when (i < 3) { }
                 catch (TaskCanceledException) when (i < 3 && !ct.IsCancellationRequested) { }
                 await Task.Delay(2000 * i, ct);
@@ -136,7 +137,14 @@ namespace Zarp.Core
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception e) { Log.Write(L.T("log.releasesFallback", e.Message)); }
 
-            string json = await RetryAsync(() => http.GetStringAsync(ReleasesApi), ct);
+            string json = await RetryAsync(async () =>
+            {
+                using (var response = await http.GetAsync(ReleasesApi, ct))
+                {
+                    response.EnsureSuccessStatusCode();
+                    return await response.Content.ReadAsStringAsync();
+                }
+            }, ct);
             var rel = (Dictionary<string, object>)new JavaScriptSerializer().DeserializeObject(json);
             string tag = rel["tag_name"] as string;
             string url = ((object[])rel["assets"]).Cast<Dictionary<string, object>>()
@@ -150,13 +158,21 @@ namespace Zarp.Core
         static async Task ExtractReleaseAsync(HttpClient http, string url, string tag, string target, CancellationToken ct)
         {
             // Качаем в память: сам архив на диск не пишем, чтобы антивирус не блокировал его целиком.
-            byte[] data = await RetryAsync(() => http.GetByteArrayAsync(url), ct);
+            byte[] data = await RetryAsync(async () =>
+            {
+                using (var response = await http.GetAsync(url, ct))
+                {
+                    response.EnsureSuccessStatusCode();
+                    return await response.Content.ReadAsByteArrayAsync();
+                }
+            }, ct);
             ct.ThrowIfCancellationRequested();
             Directory.CreateDirectory(target);
             using (var zip = new ZipArchive(new MemoryStream(data), ZipArchiveMode.Read))
             {
                 foreach (var e in zip.Entries)
                 {
+                    ct.ThrowIfCancellationRequested();
                     if (string.IsNullOrEmpty(e.Name)) continue; // каталог
                     string rel = MapEntry(e.FullName);
                     if (rel == null) continue;
@@ -227,7 +243,8 @@ namespace Zarp.Core
         public bool ExtractEmbedded()
         {
             ApplyPendingUpdate(); // скачанное обновление может оказаться новее вшитого
-            if (!EmbeddedIsNewer || Running) return false;
+            if (Running) return false;
+            if (!EmbeddedIsNewer) return RestoreMissingEmbedded();
             var data = EmbeddedZip();
             Directory.CreateDirectory(Dir);
             using (var zip = new ZipArchive(new MemoryStream(data), ZipArchiveMode.Read))
@@ -249,6 +266,35 @@ namespace Zarp.Core
             File.WriteAllText(Path.Combine(Dir, "version.txt"), EmbeddedVersion); // последним - признак целостности
             Log.Write(L.T("log.extracted", EmbeddedVersion));
             return true;
+        }
+
+        /// <summary>
+        /// Дописать файлы вшитого набора, которых нет в папке: например, фейк для стратегий новой версии Zarp при том же релизе zapret2.
+        /// Имеющиеся файлы не трогаем, они могут быть из более нового скачанного релиза.
+        /// </summary>
+        bool RestoreMissingEmbedded()
+        {
+            if (EmbeddedVersion == null || !Installed) return false;
+            bool restored = false;
+            using (var zip = new ZipArchive(new MemoryStream(EmbeddedZip()), ZipArchiveMode.Read))
+            {
+                foreach (var e in zip.Entries.Where(e => e.Name.Length > 0 && e.Name != "version.txt"))
+                {
+                    string dst = Path.Combine(Dir, e.FullName.Replace('/', '\\'));
+                    if (File.Exists(dst)) continue;
+                    Directory.CreateDirectory(Path.GetDirectoryName(dst));
+                    try
+                    {
+                        e.ExtractToFile(dst, false);
+                        restored = true;
+                    }
+                    catch (IOException ex) when (IsAntivirusError(ex))
+                    {
+                        throw new AntivirusBlockedException(L.T("err.avBlockedFile", e.FullName), ex);
+                    }
+                }
+            }
+            return restored;
         }
 
         /// <summary>
@@ -274,8 +320,7 @@ namespace Zarp.Core
         /// </summary>
         public async Task<string> DownloadUpdateAsync(CancellationToken ct)
         {
-            if (_downloading) return null;
-            _downloading = true;
+            if (Interlocked.CompareExchange(ref _downloading, 1, 0) != 0) return null;
             try
             {
                 using (var http = NewHttp())
@@ -290,11 +335,11 @@ namespace Zarp.Core
             }
             finally
             {
-                _downloading = false;
+                Volatile.Write(ref _downloading, 0);
             }
         }
 
-        public bool UpdatePending => !_downloading && Complete(NewDir);
+        public bool UpdatePending => Volatile.Read(ref _downloading) == 0 && Complete(NewDir);
 
         /// <summary>
         /// Подменить zapret2 скачанной версией. Возможно только когда winws2 не запущен (файлы не заняты),
@@ -306,8 +351,16 @@ namespace Zarp.Core
             string ver = ReadVersion(NewDir);
             try
             {
-                if (Directory.Exists(OldDir)) Directory.Delete(OldDir, true);
-                if (Directory.Exists(Dir)) Directory.Move(Dir, OldDir);
+                if (Complete(OldDir))
+                {
+                    // Текущая версия ещё не прошла запуск: сохраняем последнюю проверенную копию.
+                    if (Directory.Exists(Dir)) Directory.Delete(Dir, true);
+                }
+                else
+                {
+                    if (Directory.Exists(OldDir)) Directory.Delete(OldDir, true);
+                    if (Directory.Exists(Dir)) Directory.Move(Dir, OldDir);
+                }
                 Directory.Move(NewDir, Dir);
             }
             catch (Exception e)
@@ -421,49 +474,61 @@ namespace Zarp.Core
 
         // ------------------------------------------------------------------ запуск
 
-        public bool Running => FindOurProcesses().Any();
+        public bool Running
+        {
+            get
+            {
+                bool found = false;
+                foreach (var p in FindOurProcesses()) { found = true; p.Dispose(); }
+                return found;
+            }
+        }
 
         /// <summary>Запустить winws2 со стратегией. При ошибке возвращает её описание.</summary>
-        public async Task<Msg> StartAsync(Strategy s, bool restrictToWarpIps)
+        public async Task<Msg> StartAsync(Strategy s, bool restrictToWarpIps, CancellationToken ct = default)
         {
+            ct.ThrowIfCancellationRequested();
             Stop();
-            bool updated = ApplyPendingUpdate(); // winws2 остановлен - самое время подменить файлы
+            ApplyPendingUpdate(); // winws2 остановлен - самое время подменить файлы
             if (!s.UsesZapret) return null;
-            if (!Installed) return new Msg("err.zapretMissing");
-
-            var err = await StartWithRetryAsync(s, restrictToWarpIps);
+            Msg err;
+            try { err = Installed ? await StartWithRetryAsync(s, restrictToWarpIps, ct) : new Msg("err.zapretMissing"); }
+            catch (OperationCanceledException) { Stop(); throw; }
+            catch (Exception e) { Stop(); err = new Msg("err.winwsStart", e.Message); }
             if (err == null)
             {
-                if (updated) try { Directory.Delete(OldDir, true); } catch { }
+                try { if (Directory.Exists(OldDir)) Directory.Delete(OldDir, true); } catch { }
                 return null;
             }
-            if (updated && RollbackUpdate())
-                err = await StartWithRetryAsync(s, restrictToWarpIps);
+            if (RollbackUpdate())
+                err = await StartWithRetryAsync(s, restrictToWarpIps, ct);
             return err;
         }
 
-        async Task<Msg> StartWithRetryAsync(Strategy s, bool restrictToWarpIps)
+        async Task<Msg> StartWithRetryAsync(Strategy s, bool restrictToWarpIps, CancellationToken ct)
         {
+            ct.ThrowIfCancellationRequested();
             File.WriteAllText(CfgFile, BuildConfig(s, restrictToWarpIps), new UTF8Encoding(false));
             Msg err = null;
             for (int attempt = 0; attempt < 2; attempt++)
             {
-                err = await StartOnceAsync();
+                err = await StartOnceAsync(ct);
                 if (err == null) return null;
                 Stop();
-                await Task.Delay(1000); // даём WinDivert и файлам освободиться
+                if (attempt == 0) await Task.Delay(1000, ct); // даём WinDivert и файлам освободиться
             }
             return err;
         }
 
         Process _shell;
 
-        async Task<Msg> StartOnceAsync()
+        async Task<Msg> StartOnceAsync(CancellationToken ct)
         {
+            ct.ThrowIfCancellationRequested();
             try { File.Delete(LogFile); } catch { }
 
             // cmd нужен только для перенаправления вывода в файл: так winws2 не зависит от жизни окна Zarp.
-            var psi = new ProcessStartInfo("cmd.exe", "/d /c \"winws2.exe @zarp.cfg > winws2.log 2>&1\"")
+            var psi = new ProcessStartInfo(ProcessUtil.SystemExe("cmd.exe"), "/d /s /c \"\"" + Path.GetFullPath(Exe) + "\" @zarp.cfg > winws2.log 2>&1\"")
             {
                 UseShellExecute = false,
                 CreateNoWindow = true,
@@ -481,7 +546,7 @@ namespace Zarp.Core
             // winws2 падает сразу, если фильтр/аргументы неверны или драйвер не загрузился
             for (int i = 0; i < 12; i++)
             {
-                await Task.Delay(150);
+                await Task.Delay(150, ct);
                 if (i >= 3 && !Running) break;
             }
             if (Running) return null;
@@ -518,7 +583,7 @@ namespace Zarp.Core
             foreach (var p in Process.GetProcessesByName("winws2"))
             {
                 string path = GetProcessPath(p);
-                if (path == null || string.Equals(Path.GetFullPath(path), exe, StringComparison.OrdinalIgnoreCase))
+                if (path != null && ProcessUtil.SamePath(path, exe))
                     yield return p;
                 else
                     p.Dispose();

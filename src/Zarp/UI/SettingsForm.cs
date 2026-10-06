@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using Zarp.Core;
 
@@ -27,6 +28,11 @@ namespace Zarp.UI
         readonly ToggleSwitch _autoUpdate = new ToggleSwitch(L.T("opt.autoUpdate"));
         readonly Label _zapretVer = new Label();
         bool _loading;
+        bool _autostartBusy, _editing;
+        readonly Button _custom;
+        readonly Icon _ownedIcon;
+        internal Func<Task<bool>> QueryAutostart = Autostart.IsEnabledAsync;
+        internal Func<bool, string, Task<bool>> SetAutostart = Autostart.SetAsync;
 
         public SettingsForm(Engine engine)
         {
@@ -44,7 +50,7 @@ namespace Zarp.UI
             MinimumSize = new Size(760, 700);
             ShowInTaskbar = false;
             Theme.DarkTitleBar(this);
-            Icon = engine.State == EngineState.Connected ? Theme.AppIcon(32, Theme.Accent) : Theme.AppIcon(32, Theme.Off);
+            Icon = _ownedIcon = engine.State == EngineState.Connected ? Theme.AppIcon(32, Theme.Accent) : Theme.AppIcon(32, Theme.Off);
 
             const int Left0 = 20; // левый отступ
             int W = ClientSize.Width - Left0 * 2;
@@ -106,8 +112,8 @@ namespace Zarp.UI
             // «Отмена» показывается на месте кнопок поиска, пока идёт поиск: так все кнопки влезают в ряд на любом языке
             _cancel = Theme.FlatButton(L.T("btn.cancel"), 110);
             _cancel.Click += (s, e) => _engine.Cancel();
-            var custom = Theme.FlatButton(L.T("btn.custom"), 120);
-            custom.Click += (s, e) => OpenCustomFile();
+            var custom = _custom = Theme.FlatButton(L.T("btn.custom"), 120);
+            custom.Click += async (s, e) => await OpenCustomFile();
 
             var actions = new FlowLayoutPanel
             {
@@ -164,7 +170,7 @@ namespace Zarp.UI
             _stopAfter.Location = new Point(numberX, 486);
 
             folder.Location = new Point(R, 542);
-            folder.Click += (s, e) => Process.Start("explorer.exe", "\"" + _engine.DataDir + "\"");
+            folder.Click += (s, e) => OpenExplorer("\"" + _engine.DataDir + "\"");
             defender.Location = new Point(folder.Right + 8, 542);
             defender.Click += async (s, e) =>
             {
@@ -179,6 +185,7 @@ namespace Zarp.UI
                 update.Enabled = false;
                 _zapretVer.Text = L.T("settings.checking");
                 await _engine.CheckZapretUpdateAsync(true);
+                if (IsDisposed) return;
                 ShowZapretVersion();
                 update.Enabled = true;
             };
@@ -197,7 +204,7 @@ namespace Zarp.UI
             licenses.Click += (s, e) =>
             {
                 string dir = Licenses.Extract(_engine.DataDir);
-                Process.Start("explorer.exe", "/select,\"" + Path.Combine(dir, Licenses.NoticesFile) + "\"");
+                OpenExplorer("/select,\"" + Path.Combine(dir, Licenses.NoticesFile) + "\"");
             };
 
             foreach (var c in new Control[] { timeoutLbl, _timeout, stopLbl, _stopAfter, folder, defender, update, _zapretVer })
@@ -217,9 +224,25 @@ namespace Zarp.UI
             _stopAfter.ValueChanged += (s, e) => { SaveOptions(); ShowQuickTip(); };
             _autostart.CheckedChanged += async (s, e) =>
             {
-                if (_loading) return;
-                bool ok = await Autostart.SetAsync(_autostart.Checked, Application.ExecutablePath);
-                if (!ok) { _loading = true; _autostart.Checked = !_autostart.Checked; _loading = false; }
+                if (_loading || _autostartBusy) return;
+                _autostartBusy = true;
+                _autostart.Enabled = false;
+                try
+                {
+                    try { await SetAutostart(_autostart.Checked, Application.ExecutablePath); }
+                    catch (Exception ex) { Log.Write(L.T("log.error", ex.Message)); }
+                    bool enabled = await QueryAutostart();
+                    if (IsDisposed) return;
+                    _loading = true;
+                    _autostart.Checked = enabled;
+                }
+                catch (Exception ex) { Log.Write(L.T("log.error", ex.Message)); }
+                finally
+                {
+                    _loading = false;
+                    _autostartBusy = false;
+                    if (!IsDisposed) _autostart.Enabled = true;
+                }
             };
 
             _engine.Changed += OnEngineChanged;
@@ -279,7 +302,9 @@ namespace Zarp.UI
             _stopAfter.Value = c.StopAfterWorking;
             _loading = false;
             _autostart.Enabled = false;
-            bool autostart = await Autostart.IsEnabledAsync();
+            bool autostart;
+            try { autostart = await QueryAutostart(); }
+            catch (Exception e) { Log.Write(L.T("log.error", e.Message)); return; }
             if (IsDisposed) return;
             _loading = true;
             _autostart.Checked = autostart;
@@ -317,7 +342,7 @@ namespace Zarp.UI
                     current ? "✔" : "",
                     s.Name,
                     Strategy.TransportTitle(s.Transport),
-                    r == null ? L.T("result.notTested") : r.Ok ? L.T(r.Confirmed ? "result.works2" : "result.works1") : r.DisplayError,
+                    r == null ? L.T("result.notTested") : r.Ok ? L.T(r.Confirmed ? (r.Independent ? "result.works2" : "result.worksRepeated") : "result.works1") : r.DisplayError,
                     r != null && r.Ok ? r.ConnectMs.ToString() : "",
                     r != null && r.Ok ? r.PingMs.ToString() : "",
                 })
@@ -345,34 +370,69 @@ namespace Zarp.UI
             await _engine.UseStrategyAsync(sel[0]);
         }
 
-        void OpenCustomFile()
+        async Task OpenCustomFile()
         {
+            if (_editing || _engine.IsBusy) return;
+            _editing = true;
+            _custom.Enabled = false;
             string path = Path.Combine(_engine.DataDir, StrategyCatalog.CustomFileName);
             if (!File.Exists(path)) _engine.ReloadStrategies(); // создаст шаблон
             try
             {
-                using (var p = Process.Start("notepad.exe", "\"" + path + "\""))
-                    p?.WaitForExit();
+                using (var p = Process.Start(new ProcessStartInfo(ProcessUtil.SystemExe("notepad.exe"), "\"" + path + "\"") { UseShellExecute = false }))
+                    if (p != null) await ProcessUtil.WaitForExitAsync(p);
             }
-            catch { }
-            _engine.ReloadStrategies();
-            FillList();
+            catch (Exception e) { Log.Write(L.T("log.error", e.Message)); }
+            finally
+            {
+                _editing = false;
+                if (!IsDisposed)
+                {
+                    if (!_engine.IsBusy) _engine.ReloadStrategies();
+                    FillList();
+                    UpdateButtons();
+                }
+            }
+        }
+
+        static void OpenExplorer(string args)
+        {
+            try
+            {
+                string exe = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
+                using (Process.Start(new ProcessStartInfo(exe, args) { UseShellExecute = false })) { }
+            }
+            catch (Exception e) { Log.Write(L.T("log.error", e.Message)); }
+        }
+
+        protected override void OnActivated(EventArgs e)
+        {
+            base.OnActivated(e);
+            // Современный Блокнот может передать файл уже работающему процессу и сразу завершить launcher.
+            if (!_engine.IsBusy)
+            {
+                _engine.ReloadStrategies();
+                FillList();
+            }
         }
 
         void OnEngineChanged()
         {
             if (!IsHandleCreated || IsDisposed) return;
-            BeginInvoke((Action)(() =>
+            try { BeginInvoke((Action)(() =>
             {
                 if (IsDisposed) return;
                 if (!_engine.IsBusy || _engine.ProgressDone > 0) FillList();
                 UpdateButtons();
-            }));
+            })); }
+            catch (InvalidOperationException) { }
         }
 
         void UpdateButtons()
         {
             bool busy = _engine.IsBusy;
+            _custom.Enabled = !busy && !_editing;
+            _isolate.Enabled = _restrict.Enabled = _timeout.Enabled = _stopAfter.Enabled = !busy;
             int n = _list.SelectedItems.Count;
             _use.Enabled = !busy && n == 1;
             _test.Enabled = !busy && n > 0;
@@ -382,11 +442,15 @@ namespace Zarp.UI
             _status.Text = busy ? "⏳ " + _engine.Detail + prog : _engine.Detail;
         }
 
-        protected override void OnFormClosed(FormClosedEventArgs e)
+        protected override void Dispose(bool disposing)
         {
-            _engine.Changed -= OnEngineChanged;
-            _tips.Dispose();
-            base.OnFormClosed(e);
+            if (disposing)
+            {
+                _engine.Changed -= OnEngineChanged;
+                _tips.Dispose();
+                _ownedIcon?.Dispose();
+            }
+            base.Dispose(disposing);
         }
     }
 }

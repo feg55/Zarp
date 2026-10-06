@@ -32,6 +32,7 @@ tray.bgText = 图标位于系统托盘。要彻底退出：右键 → 退出。
 # ---- 对话框
 dlg.antivirus = 杀毒软件（通常是 Windows Defender）拦截了 zapret2 的文件。\n\n这是对 WinDivert 驱动的已知误报，zapret 用它来拦截流量。\n\n要将该文件夹加入 Windows Defender 排除项并重试吗？\n\n{0}
 dlg.vpn = 另一个 VPN 已开启：\n\n{0}\n\nWARP 流量会经过它，zapret 将无法起作用：WARP 可能无法连接，选出的策略也会不准确。\n\n建议关闭该 VPN。仍要继续吗？
+dlg.vpnSearch = 另一个 VPN 已开启：\n\n{0}\n\nZarp 通过测试 WARP 的连接情况来挑选策略。经过另一个 VPN 时，每次测试测到的都是该 VPN 而不是你的网络，所有策略都会显得无效，结果毫无用处。\n\n请彻底关闭该 VPN（退出其应用）后重试。仍要搜索吗？
 dlg.defender = 要将 zapret2 文件夹加入 Windows Defender 排除项吗？\n\n{0}
 dlg.otherCopy = 另一个 Zarp 副本已在运行：\n\n{0}\n\n要关闭它并打开当前这个吗？如果 WARP 已连接，Zarp 会自动重新连接。
 dlg.otherCopies = 其他 Zarp 副本已在运行：\n\n{0}\n\n要关闭它们并打开当前这个吗？如果 WARP 已连接，Zarp 会自动重新连接。
@@ -83,7 +84,7 @@ opt.closeExit = 退出程序
 opt.closeAccessible = 关闭窗口时的操作
 opt.disconnectOnExit = 退出时断开 WARP
 opt.restrict = 仅拦截 WARP 地址
-opt.isolate = 隔离检测（每次使用新端点）
+opt.isolate = 复查时使用其他端点
 opt.autoUpdate = 自动更新 zapret2
 opt.timeout = 连接等待时间（秒）
 opt.stopAfter = 快速查找：找到几个\n可用策略后停止
@@ -93,8 +94,6 @@ result.works2 = 可用 ✔✔
 result.works1 = 可用（1 次检测）
 result.notConfirmed = 未确认：{0}
 result.applyFailed = 应用时连接失败
-
-strategy.direct = 不使用 zapret（直接连接）
 
 # ---- 按钮下方的状态
 detail.disconnecting = 正在断开...
@@ -151,6 +150,8 @@ log.noWarpCli = 未找到 warp-cli.exe。请安装 Cloudflare WARP：https://one
 log.otherDpi = 注意：另一个反 DPI 工具正在运行，可能造成干扰：{0}
 log.otherVpn = 注意：另一个 VPN 处于活动状态，WARP 流量会经过它：{0}
 log.vpnAdvice = 请关闭其他 VPN，否则 WARP 可能无法连接，策略也会选错。
+log.vpnNoSearch = 另一个 VPN 已开启，此时搜索策略测到的只是该 VPN，而不是你的网络。请彻底关闭它后重新搜索。
+log.vpnConnectFailed = 另一个 VPN 开启期间 WARP 未能连接。已保存的结果没有改动。请彻底关闭该 VPN 后重试。
 log.downloadFailed = 无法下载 zapret2：{0}
 log.manualInstall = 也可以手动解压：将 {0} 放入 {1}
 log.searchQuick = 快速查找：共 {0} 个策略，找到 {1} 个可用策略后停止
@@ -159,7 +160,7 @@ log.searchSelected = 检测所选策略：{0}
 log.testOk = ✔ {0}：连接 {1} 毫秒，延迟 {2} 毫秒
 log.testFail = ✘ {0}：{1}
 log.recheck = 待复查的候选策略：{0}
-log.recheckOk = ✔✔ {0}：已确认（连接 {1} 毫秒，延迟 {2} 毫秒）
+log.recheckOk = {0}：已确认（连接 {1} 毫秒，延迟 {2} 毫秒）
 log.candidatesFailed = 候选策略未通过复查，可能只是偶然成功。请重新查找或增加等待时间。
 log.noneWorked = 没有可用的策略。请在设置中增加等待时间，或在 {0} 中添加自定义策略
 log.best = 最佳策略：{0}（连接 {1} 毫秒，延迟 {2} 毫秒）
@@ -214,3 +215,11 @@ log.warpInstalled = Cloudflare WARP 已安装：{0}
 log.warpInstallFailed = Cloudflare WARP 安装失败：{0}
 log.warpManual = 请自行从 https://one.one.one.one/ 安装 Cloudflare WARP（或运行：winget install Cloudflare.Warp）。如果该网站被屏蔽，请通过其他方式获得 Cloudflare_WARP.msi，放入 {0}，然后再次按下按钮。
 log.warpRestart = Windows 要求重启才能完成 Cloudflare WARP 的安装。
+
+err.endpoint = 无法更改 WARP 端点。
+err.transport = WARP 未确认传输协议变更。
+err.warpCommand = warp-cli 失败（{0}）：{1}
+err.disconnect = WARP 未确认断开连接。
+status.unknown = 连接未确认
+detail.connectionUnknown = 无法验证 WARP 状态：{0}
+result.worksRepeated = 可用（2 次检查）

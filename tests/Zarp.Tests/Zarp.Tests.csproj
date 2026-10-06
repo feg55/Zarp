@@ -7,5 +7,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Zarp/Zarp.csproj" />
+    <Reference Include="System.Net.Http" />
   </ItemGroup>
 </Project>

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Web.Script.Serialization;
 
@@ -18,15 +19,18 @@ namespace Zarp.Core
         /// <summary>Ошибка как ключ перевода и аргументы: показывается на текущем языке.</summary>
         public string ErrorKey { get; set; }
         public string[] ErrorArgs { get; set; }
-        /// <summary>Ошибка случилась на второй, независимой проверке.</summary>
+        /// <summary>Ошибка случилась на повторной проверке.</summary>
         public bool Rechecked { get; set; }
         public DateTime When { get; set; }
-        /// <summary>Стратегия прошла вторую, независимую проверку (на другом эндпоинте WARP).</summary>
+        /// <summary>Стратегия прошла два теста. Независимость адресов хранится отдельно.</summary>
         public bool Confirmed { get; set; }
+        public string Endpoint { get; set; }
+        public bool EndpointReused { get; set; }
+        public bool Independent { get; set; }
 
         /// <summary>Чем меньше, тем лучше. Пинг весит больше: он влияет на всю работу, а подключение - один раз.</summary>
         [ScriptIgnore]
-        public int Score => Ok ? ConnectMs + PingMs * 4 : int.MaxValue;
+        public int Score => Ok ? (int)Math.Min(int.MaxValue - 1L, Math.Max(0L, ConnectMs) + Math.Max(0L, PingMs) * 4) : int.MaxValue;
 
         public void Fail(Msg error)
         {
@@ -60,8 +64,8 @@ namespace Zarp.Core
         /// <summary>Перехватывать только трафик на адреса WARP (рекомендуется).</summary>
         public bool RestrictToWarpIps { get; set; } = true;
         /// <summary>
-        /// Каждый тест - на новый эндпоинт WARP (IP:порт). Без этого тест «наследует» состояние DPI
-        /// от предыдущего удачного подключения, и нерабочая стратегия выглядит рабочей.
+        /// При перепроверке выбирать другой эндпоинт WARP. Пул конечен, повторное использование
+        /// адресов отмечается в результате и не считается независимой проверкой.
         /// </summary>
         public bool IsolateTests { get; set; } = true;
         /// <summary>Проверять новые релизы zapret2 на GitHub и обновляться в фоне.</summary>
@@ -69,28 +73,44 @@ namespace Zarp.Core
         /// <summary>Код языка интерфейса; null - как в системе.</summary>
         public string Language { get; set; }
 
-        static string _path;
+        string _path;
+        bool _recovered;
+        readonly object _saveLock = new object();
 
         public static AppConfig Load(string path)
         {
-            _path = path;
-            try
+            foreach (string candidate in new[] { path, path + ".bak" })
             {
-                if (File.Exists(path))
+                try
                 {
-                    var cfg = new JavaScriptSerializer().Deserialize<AppConfig>(File.ReadAllText(path, Encoding.UTF8));
-                    if (cfg != null)
-                    {
-                        cfg.Results = cfg.Results ?? new Dictionary<string, TestResult>();
-                        return cfg;
-                    }
+                    if (!File.Exists(candidate)) continue;
+                    var cfg = new JavaScriptSerializer().Deserialize<AppConfig>(File.ReadAllText(candidate, Encoding.UTF8));
+                    if (cfg == null) throw new InvalidDataException("Empty configuration");
+                    cfg._path = path;
+                    cfg._recovered = candidate != path;
+                    cfg.Normalize();
+                    return cfg;
+                }
+                catch (Exception e)
+                {
+                    Log.Write(L.T("log.configBroken", e.Message));
                 }
             }
-            catch (Exception e)
+            return new AppConfig { _path = path };
+        }
+
+        void Normalize()
+        {
+            TestTimeoutSec = Math.Max(5, Math.Min(60, TestTimeoutSec));
+            StopAfterWorking = Math.Max(0, Math.Min(100, StopAfterWorking));
+            Results = Results ?? new Dictionary<string, TestResult>();
+            foreach (var entry in Results.ToList())
             {
-                Log.Write(L.T("log.configBroken", e.Message));
+                var r = entry.Value;
+                if (string.IsNullOrWhiteSpace(entry.Key) || r == null || r.StrategyId != entry.Key || r.ConnectMs < 0 || r.PingMs < 0)
+                    Results.Remove(entry.Key);
+                else if (!r.Ok) { r.Confirmed = false; r.Independent = false; }
             }
-            return new AppConfig();
         }
 
         /// <summary>
@@ -113,15 +133,31 @@ namespace Zarp.Core
 
         public void Save()
         {
+            lock (_saveLock) SaveCore();
+        }
+
+        void SaveCore()
+        {
+            string tmp = null;
             try
             {
                 string json = new JavaScriptSerializer().Serialize(this);
-                File.WriteAllText(_path, json, new UTF8Encoding(false));
+                tmp = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                byte[] bytes = new UTF8Encoding(false).GetBytes(json);
+                using (var file = new FileStream(tmp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                {
+                    file.Write(bytes, 0, bytes.Length);
+                    file.Flush(true);
+                }
+                if (File.Exists(_path)) File.Replace(tmp, _path, _recovered ? null : _path + ".bak");
+                else File.Move(tmp, _path);
+                _recovered = false;
             }
             catch (Exception e)
             {
                 Log.Write(L.T("log.configSaveFailed", e.Message));
             }
+            finally { if (tmp != null) try { File.Delete(tmp); } catch { } }
         }
     }
 }

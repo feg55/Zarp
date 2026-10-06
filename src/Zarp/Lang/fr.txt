@@ -32,6 +32,7 @@ tray.bgText = Il est dans la zone de notification. Pour quitter : clic droit →
 # ---- boîtes de dialogue
 dlg.antivirus = L’antivirus (généralement Windows Defender) a bloqué les fichiers de zapret2.\n\nC’est un faux positif connu, dû au pilote WinDivert que zapret utilise pour intercepter le trafic.\n\nAjouter le dossier aux exclusions de Windows Defender et réessayer ?\n\n{0}
 dlg.vpn = Un autre VPN est actif :\n\n{0}\n\nLe trafic de WARP passera par lui et zapret n’aura aucun effet : WARP risque de ne pas se connecter et la stratégie choisie sera fausse.\n\nMieux vaut désactiver ce VPN. Continuer quand même ?
+dlg.vpnSearch = Un autre VPN est actif :\n\n{0}\n\nZarp choisit une stratégie en testant la connexion de WARP. Via un autre VPN, chaque test mesure ce VPN et non votre réseau : toutes les stratégies sembleront en panne et le résultat sera inutile.\n\nDésactivez complètement ce VPN (fermez son application), puis réessayez. Lancer la recherche quand même ?
 dlg.defender = Ajouter le dossier de zapret2 aux exclusions de Windows Defender ?\n\n{0}
 dlg.otherCopy = Une autre copie de Zarp est déjà en cours d’exécution :\n\n{0}\n\nLa fermer et ouvrir celle-ci ? Si WARP est connecté, Zarp le reconnectera.
 dlg.otherCopies = D’autres copies de Zarp sont déjà en cours d’exécution :\n\n{0}\n\nLes fermer et ouvrir celle-ci ? Si WARP est connecté, Zarp le reconnectera.
@@ -83,7 +84,7 @@ opt.closeExit = Quitter l’application
 opt.closeAccessible = Action à la fermeture de la fenêtre
 opt.disconnectOnExit = Déconnecter WARP en quittant
 opt.restrict = N’intercepter que les adresses WARP
-opt.isolate = Isoler les tests (nouveau point d’accès par test)
+opt.isolate = Autre point de terminaison au second test
 opt.autoUpdate = Mettre à jour zapret2 automatiquement
 opt.timeout = Délai de connexion, s
 opt.stopAfter = Recherche rapide : nombre\nde stratégies valides
@@ -93,8 +94,6 @@ result.works2 = fonctionne ✔✔
 result.works1 = fonctionne (1 test)
 result.notConfirmed = non confirmée : {0}
 result.applyFailed = échec de connexion à l’application
-
-strategy.direct = Sans zapret (connexion directe)
 
 # ---- ligne d’état sous le bouton
 detail.disconnecting = Déconnexion...
@@ -151,6 +150,8 @@ log.noWarpCli = warp-cli.exe introuvable. Installez Cloudflare WARP : https://on
 log.otherDpi = Attention : un autre outil anti-DPI est en cours d’exécution et peut interférer : {0}
 log.otherVpn = Attention : un autre VPN est actif et le trafic de WARP passe par lui : {0}
 log.vpnAdvice = Désactivez l’autre VPN, sinon WARP risque de ne pas se connecter et la stratégie sera mal choisie.
+log.vpnNoSearch = Un autre VPN est actif : la recherche de stratégie ne mesurerait que ce VPN et non votre réseau. Désactivez-le complètement et relancez la recherche.
+log.vpnConnectFailed = WARP ne s’est pas connecté tant qu’un autre VPN était actif. Les résultats enregistrés n’ont pas été modifiés. Désactivez complètement le VPN et réessayez.
 log.downloadFailed = Impossible de télécharger zapret2 : {0}
 log.manualInstall = Vous pouvez l’extraire à la main : placez {0} dans {1}
 log.searchQuick = Recherche rapide : {0} stratégies, arrêt après {1} valides
@@ -159,7 +160,7 @@ log.searchSelected = Test de la sélection : {0}
 log.testOk = ✔ {0} : connexion {1} ms, ping {2} ms
 log.testFail = ✘ {0} : {1}
 log.recheck = Candidates à retester : {0}
-log.recheckOk = ✔✔ {0} : confirmée (connexion {1} ms, ping {2} ms)
+log.recheckOk = {0} : confirmée (connexion {1} ms, ping {2} ms)
 log.candidatesFailed = Les candidates n’ont pas passé le nouveau test : elles ont sans doute réussi par hasard. Relancez la recherche ou augmentez le délai.
 log.noneWorked = Aucune stratégie n’a fonctionné. Augmentez le délai dans les paramètres ou ajoutez vos stratégies dans {0}
 log.best = Meilleure stratégie : {0} (connexion {1} ms, ping {2} ms)
@@ -214,3 +215,11 @@ log.warpInstalled = Cloudflare WARP installé : {0}
 log.warpInstallFailed = Échec de l’installation de Cloudflare WARP : {0}
 log.warpManual = Installez Cloudflare WARP vous-même depuis https://one.one.one.one/ (ou avec : winget install Cloudflare.Warp). Si ce site est bloqué, procurez-vous Cloudflare_WARP.msi autrement, placez-le dans {0} et appuyez de nouveau sur le bouton.
 log.warpRestart = Windows demande un redémarrage pour terminer l’installation de Cloudflare WARP.
+
+err.endpoint = Impossible de changer le point de terminaison WARP.
+err.transport = WARP n’a pas confirmé le changement de transport.
+err.warpCommand = Échec de warp-cli ({0}) : {1}
+err.disconnect = WARP n’a pas confirmé la déconnexion.
+status.unknown = Connexion non vérifiée
+detail.connectionUnknown = État WARP non vérifiable : {0}
+result.worksRepeated = fonctionne (2 tests)

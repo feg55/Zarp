@@ -22,6 +22,8 @@ namespace Zarp.Core
 
         /// <summary>Подмена поиска в тестах: они не должны находить и запускать настоящий WARP.</summary>
         internal static Func<WarpLocator.Result> Finder = WarpLocator.Find;
+        internal static Func<string, Authenticode.Result> VerifyCli = Authenticode.Verify;
+        internal Func<string, int, CancellationToken, Task<RunResult>> CommandRunner = null;
 
         // последний выставленный транспорт - чтобы не дёргать настройки WARP без нужды
         WarpTransport? _transport;
@@ -35,6 +37,7 @@ namespace Zarp.Core
         public WarpLocator.Result Locate()
         {
             var result = Finder();
+            if (!ProcessUtil.SamePath(CliPath, result.CliPath)) _transport = null;
             CliPath = result.CliPath;
             return LastSearch = result;
         }
@@ -50,24 +53,35 @@ namespace Zarp.Core
             while (sw.ElapsedMilliseconds < timeoutMs)
             {
                 ct.ThrowIfCancellationRequested();
-                if ((await Cli("status", 8000)).Ok) return true;
+                if ((await Cli("status", Math.Max(1, Math.Min(8000, timeoutMs - (int)sw.ElapsedMilliseconds)), ct)).Ok) return true;
                 if (!serviceStarted && sw.ElapsedMilliseconds > 15000)
                 {
                     serviceStarted = true; // служба с отложенным запуском: подтолкнуть один раз
-                    await ProcessUtil.RunAsync(ProcessUtil.SystemExe("sc.exe"), "start CloudflareWARP", 15000);
+                    await ProcessUtil.RunAsync(ProcessUtil.SystemExe("sc.exe"), "start CloudflareWARP", 15000, ct);
                 }
                 await Task.Delay(1000, ct);
             }
             return false;
         }
 
-        public Task<RunResult> Cli(string args, int timeoutMs = 15000) =>
-            ProcessUtil.RunAsync(CliPath, "--accept-tos " + args, timeoutMs);
+        public Task<RunResult> Cli(string args, int timeoutMs = 15000, CancellationToken ct = default) => Task.Run(async () =>
+        {
+            ct.ThrowIfCancellationRequested();
+            if (CommandRunner != null) return await CommandRunner(args, timeoutMs, ct).ConfigureAwait(false);
+            string path = CliPath;
+            if (path == null) throw new InvalidOperationException(L.T("detail.noWarp"));
+            // Запрет записи/замены действует от проверки подписи до завершения команды.
+            using (var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                WarpInstaller.CheckSigner(VerifyCli(path));
+                return await ProcessUtil.RunAsync(path, "--accept-tos " + args, timeoutMs, ct).ConfigureAwait(false);
+            }
+        }, ct);
 
         /// <summary>Статус из `warp-cli -j status`: Connected, Connecting, Disconnected...</summary>
-        public async Task<(string Status, string Reason)> StatusAsync()
+        public async Task<(string Status, string Reason)> StatusAsync(CancellationToken ct = default, int timeoutMs = 8000)
         {
-            var r = await Cli("-j status", 8000);
+            var r = await Cli("-j status", timeoutMs, ct);
             if (!r.Ok) return ("Unknown", r.Output);
             try
             {
@@ -83,12 +97,12 @@ namespace Zarp.Core
         }
 
         /// <summary>Проверить, что клиент зарегистрирован; если нет - зарегистрировать.</summary>
-        public async Task<bool> EnsureRegisteredAsync()
+        public async Task<bool> EnsureRegisteredAsync(CancellationToken ct = default)
         {
-            var r = await Cli("registration show");
+            var r = await Cli("registration show", ct: ct);
             if (r.Ok) return true;
             Log.Write(L.T("log.warpRegistering"));
-            r = await Cli("registration new", 30000);
+            r = await Cli("registration new", 30000, ct);
             Log.Write(r.Ok ? L.T("log.warpRegistered") : L.T("log.warpRegisterFailed", r.Output));
             return r.Ok;
         }
@@ -98,17 +112,18 @@ namespace Zarp.Core
         {
             if (_transport == t) return;
             bool familyChanged = _transport == null || (_transport == WarpTransport.WireGuard) != (t == WarpTransport.WireGuard);
+            _transport = null;
             if (t == WarpTransport.WireGuard)
             {
-                await Cli("tunnel protocol set WireGuard");
+                RequireOk(await Cli("tunnel protocol set WireGuard", ct: ct));
             }
             else
             {
-                await Cli("tunnel protocol set MASQUE");
-                await Cli("tunnel masque-options set " + (t == WarpTransport.MasqueH2 ? "h2-only" : "h3-only"));
+                RequireOk(await Cli("tunnel protocol set MASQUE", ct: ct));
+                RequireOk(await Cli("tunnel masque-options set " + (t == WarpTransport.MasqueH2 ? "h2-only" : "h3-only"), ct: ct));
             }
-            _transport = t;
             if (familyChanged) await WaitProtocolAppliedAsync(t, ct);
+            _transport = t;
         }
 
         // Эндпоинты: WireGuard - 162.159.192-195.x / 2606:4700:d0..d1::, MASQUE - 162.159.197-198.x / 2606:4700:102-103::
@@ -122,29 +137,39 @@ namespace Zarp.Core
         async Task WaitProtocolAppliedAsync(WarpTransport t, CancellationToken ct)
         {
             var want = t == WarpTransport.WireGuard ? WireGuardEndpoint : MasqueEndpoint;
-            await DisconnectAsync();
-            await SetEndpointAsync(null); // с жёстким эндпоинтом по статусу не понять, какой протокол применился
-            await ConnectAsync();
+            await DisconnectAsync(ct);
+            if (!await SetEndpointAsync(null, ct)) throw new IOException(L.T("err.endpoint"));
+            await ConnectAsync(ct);
             var sw = Stopwatch.StartNew();
+            bool applied = false;
             while (sw.ElapsedMilliseconds < 40000)
             {
                 ct.ThrowIfCancellationRequested();
-                var (status, reason) = await StatusAsync();
-                if (status == "Connected" || want.IsMatch(reason ?? "")) break;
+                var (status, reason) = await StatusAsync(ct, Math.Max(1, Math.Min(8000, 40000 - (int)sw.ElapsedMilliseconds)));
+                if (status == "Connected" || want.IsMatch(reason ?? "")) { applied = true; break; }
                 await Task.Delay(400, ct);
             }
-            await DisconnectAsync();
+            await DisconnectAsync(ct);
+            // Команды смены протокола WARP уже приняты, а каждый тест ещё закрепляет эндпоинт. Если по статусу смену не
+            // удалось увидеть (в заблокированной сети в причине может не быть адреса), это повод предупредить, а не оборвать поиск.
+            if (!applied) Log.Write("  " + L.T("err.transport"));
         }
 
-        public async Task ConnectAsync() => await Cli("connect");
+        static void RequireOk(RunResult result)
+        {
+            if (!result.Ok) throw new IOException(L.T("err.warpCommand", result.ExitCode, result.Output ?? ""));
+        }
+
+        public async Task ConnectAsync(CancellationToken ct = default) => RequireOk(await Cli("connect", ct: ct));
 
         /// <summary>Жёстко задать эндпоинт туннеля (IP:порт). null - вернуть автоматический выбор.</summary>
-        public async Task<bool> SetEndpointAsync(string endpoint)
+        public async Task<bool> SetEndpointAsync(string endpoint, CancellationToken ct = default)
         {
             if (endpoint == null && !_endpointOverridden) return true; // не трогаем эндпоинт, заданный пользователем
+            if (endpoint != null) _endpointOverridden = true; // даже при таймауте команда могла успеть примениться
             var r = endpoint == null
-                ? await Cli("tunnel endpoint reset")
-                : await Cli("tunnel endpoint set " + endpoint);
+                ? await Cli("tunnel endpoint reset", ct: ct)
+                : await Cli("tunnel endpoint set " + endpoint, ct: ct);
             if (!r.Ok) Log.Write("  warp-cli tunnel endpoint: " + r.Output);
             else _endpointOverridden = endpoint != null;
             return r.Ok;
@@ -154,29 +179,41 @@ namespace Zarp.Core
 
         // Эндпоинты, к которым клиент WARP подключается сам (видно в статусе happy eyeballs).
         static readonly string[] MasqueIps = { "162.159.198.1", "162.159.198.2" };
-        static readonly int[] MasquePorts = { 443, 500, 1701, 4500, 4443, 8443 };
+        static readonly int[] MasquePorts = { 443, 500, 1701, 4500, 4443, 8443, 8095 };
         static readonly string[] WireGuardIps =
             Enumerable.Range(1, 10).Select(i => "162.159.192." + i).Concat(Enumerable.Range(1, 10).Select(i => "162.159.193." + i)).ToArray();
         static readonly int[] WireGuardPorts = { 2408, 500, 1701, 4500, 854, 859, 864, 878, 880, 890, 891, 894 };
 
-        int _endpointSeq;
+        readonly Dictionary<string, int> _endpointUses = new Dictionary<string, int>();
+        public bool EndpointWasReused { get; private set; }
 
-        /// <summary>Следующий ещё не использованный эндпоинт для транспорта - чтобы каждый тест шёл по «чистому» соединению.</summary>
-        public string NextEndpoint(WarpTransport t)
+        /// <summary>Наименее использованный эндпоинт, отличный от первого теста. Пулы адресов конечны.</summary>
+        public string NextEndpoint(WarpTransport t, string except = null)
         {
-            int n = _endpointSeq++;
-            switch (t)
-            {
-                case WarpTransport.WireGuard:
-                    return WireGuardIps[n % WireGuardIps.Length] + ":" + WireGuardPorts[n / WireGuardIps.Length % WireGuardPorts.Length];
-                case WarpTransport.MasqueH2:
-                    return MasqueIps[n % MasqueIps.Length] + ":443"; // HTTP/2 идёт по TCP 443
-                default:
-                    return MasqueIps[n % MasqueIps.Length] + ":" + MasquePorts[n / MasqueIps.Length % MasquePorts.Length];
-            }
+            var ips = t == WarpTransport.WireGuard ? WireGuardIps : MasqueIps;
+            var ports = t == WarpTransport.WireGuard ? WireGuardPorts : t == WarpTransport.MasqueH2 ? new[] { 443 } : MasquePorts;
+            string prefix = t + "/";
+            int Uses(string endpoint) => _endpointUses.TryGetValue(prefix + endpoint, out var count) ? count : 0;
+            string next = ports.SelectMany(port => ips.Select(ip => ip + ":" + port))
+                .Where(endpoint => endpoint != except).OrderBy(Uses).First();
+            int used = Uses(next);
+            EndpointWasReused = used > 0;
+            _endpointUses[prefix + next] = used + 1;
+            return next;
         }
 
-        public async Task DisconnectAsync() => await Cli("disconnect");
+        public async Task DisconnectAsync(CancellationToken ct = default)
+        {
+            RequireOk(await Cli("disconnect", ct: ct));
+            var sw = Stopwatch.StartNew();
+            while (sw.ElapsedMilliseconds < 8000)
+            {
+                var (status, _) = await StatusAsync(ct, Math.Max(1, 8000 - (int)sw.ElapsedMilliseconds));
+                if (status == "Disconnected") return;
+                await Task.Delay(200, ct);
+            }
+            throw new IOException(L.T("err.disconnect"));
+        }
 
         /// <summary>Ждать статуса Connected. Возвращает время подключения в мс или -1.</summary>
         public async Task<int> WaitConnectedAsync(int timeoutMs, CancellationToken ct)
@@ -186,7 +223,7 @@ namespace Zarp.Core
             while (sw.ElapsedMilliseconds < timeoutMs)
             {
                 ct.ThrowIfCancellationRequested();
-                var (status, reason) = await StatusAsync();
+                var (status, reason) = await StatusAsync(ct, Math.Max(1, Math.Min(8000, timeoutMs - (int)sw.ElapsedMilliseconds)));
                 if (status == "Connected") return (int)sw.ElapsedMilliseconds;
                 lastReason = reason;
                 await Task.Delay(300, ct);
@@ -220,14 +257,19 @@ namespace Zarp.Core
                 string body;
                 try
                 {
-                    body = await Http.GetStringAsync("https://www.cloudflare.com/cdn-cgi/trace?" + Guid.NewGuid().ToString("N"));
+                    using (var response = await Http.GetAsync("https://www.cloudflare.com/cdn-cgi/trace?" + Guid.NewGuid().ToString("N"), ct))
+                    {
+                        response.EnsureSuccessStatusCode();
+                        body = await response.Content.ReadAsStringAsync();
+                    }
                 }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
                 catch
                 {
                     continue;
                 }
                 sw.Stop();
-                bool warp = body.Contains("warp=on") || body.Contains("warp=plus");
+                bool warp = body.Split('\n').Any(line => line.Trim() == "warp=on" || line.Trim() == "warp=plus");
                 if (!warp) return -1;
                 if (i > 0) times.Add((int)sw.ElapsedMilliseconds); // первый запрос - прогрев (DNS и т.п.)
             }

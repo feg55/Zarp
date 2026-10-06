@@ -6,7 +6,7 @@ using System.Windows.Forms;
 namespace Zarp.UI
 {
     /// <summary>Большая круглая кнопка питания с кольцом состояния и анимацией ожидания.</summary>
-    sealed class PowerButton : Control
+    sealed class PowerButton : Button
     {
         public enum Look { Off, Busy, On }
 
@@ -20,6 +20,10 @@ namespace Zarp.UI
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
                      ControlStyles.UserPaint | ControlStyles.ResizeRedraw | ControlStyles.SupportsTransparentBackColor, true);
             Cursor = Cursors.Hand;
+            FlatStyle = FlatStyle.Flat;
+            FlatAppearance.BorderSize = 0;
+            AccessibleRole = AccessibleRole.PushButton;
+            TabStop = true;
             _anim.Tick += (s, e) => { _angle = (_angle + 5f) % 360f; Invalidate(); };
         }
 
@@ -41,6 +45,8 @@ namespace Zarp.UI
         protected override void OnMouseLeave(EventArgs e) { _hover = false; _down = false; Invalidate(); base.OnMouseLeave(e); }
         protected override void OnMouseDown(MouseEventArgs e) { _down = true; Invalidate(); base.OnMouseDown(e); }
         protected override void OnMouseUp(MouseEventArgs e) { _down = false; Invalidate(); base.OnMouseUp(e); }
+        protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
+        protected override void OnLostFocus(EventArgs e) { base.OnLostFocus(e); Invalidate(); }
 
         protected override void OnPaint(PaintEventArgs e)
         {
@@ -88,6 +94,8 @@ namespace Zarp.UI
                 g.DrawArc(pen, ic, -60, 300);
                 g.DrawLine(pen, ic.X + ic.Width / 2f, ic.Y - icon * 0.12f, ic.X + ic.Width / 2f, ic.Y + ic.Height * 0.42f);
             }
+            if (Focused && ShowFocusCues)
+                ControlPaint.DrawFocusRectangle(g, Rectangle.Inflate(Rectangle.Round(disc), -8, -8), Theme.Text, Theme.Panel);
         }
 
         protected override void Dispose(bool disposing)

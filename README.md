@@ -21,8 +21,8 @@ One-click Cloudflare WARP for networks that block it. Zarp finds a [zapret2](htt
 ## Features
 
 - **One button.** The first click searches for the fastest working strategy, later clicks connect right away.
-- **Built for WARP.** Strategies target the WARP handshake only: MASQUE over QUIC, WireGuard and the MASQUE HTTP/2 fallback.
-- **Honest testing.** Each test runs against a fresh WARP endpoint and every candidate is verified twice. A strategy that only passed thanks to a previous connection is thrown out.
+- **Built for WARP.** Strategies target the WARP handshake: MASQUE over QUIC (HTTP/3) and over TLS (HTTP/2).
+- **Repeated checks.** Every candidate must pass twice, the second time on a different WARP endpoint when test isolation is on. A quick scan counts only confirmed strategies, and a connection counts only if traffic really goes through WARP.
 - **Self-healing.** If the saved strategy stops working, Zarp tries the other verified ones before searching again.
 - **Zero setup.** A single `Zarp.exe` with zapret2 embedded; zapret2 updates itself in the background. If Cloudflare WARP is missing, Zarp downloads the official client from Cloudflare and installs it after you agree.
 - **Low overhead.** Only WARP addresses and handshake packets are intercepted. The tunnel itself never passes through zapret.
@@ -60,7 +60,7 @@ Closing the window asks whether to hide Zarp in the tray or quit. Select **Remem
 > **"Windows protected your PC"?** Older releases and local builds may be unsigned. Release signing requires maintainer setup; see [code signing](docs/code-signing.md). A trusted signature identifies the publisher, but new releases can still trigger SmartScreen while reputation builds. [Verify the download](#verify-the-download) before running it.
 
 > [!NOTE]
-> Turn off any other VPN (Happ, v2rayN, Clash, AmneziaVPN, ...). WARP traffic would go through its tunnel instead and no strategy would be found. Zarp warns you when it sees one.
+> Turn off any other VPN (Happ, v2rayN, Clash, AmneziaVPN, ...) before searching. WARP traffic would go through its tunnel, so every test would measure that VPN instead of your network and no strategy would be found. Zarp warns you, asks before searching anyway, and never overwrites saved results with failures from such a run. Connecting with a strategy you already saved works either way.
 
 > [!WARNING]
 > Windows Defender may flag WinDivert as a hacktool. This is a known false positive. Zarp offers to add its zapret2 folder to Defender exclusions when that happens.
@@ -96,7 +96,7 @@ gh attestation verify .\Zarp.exe --repo feg55/Zarp     # proves the file was bui
 
 Zarp does not collect, store or send any personal data, and it has no telemetry. It makes only these network requests:
 
-- `https://www.cloudflare.com/cdn-cgi/trace`, while testing or connecting, to check that traffic goes through WARP and to measure latency.
+- `https://www.cloudflare.com/cdn-cgi/trace`, while testing or connecting, and every 15 seconds while WARP is connected, to check that traffic goes through WARP and to measure latency.
 - `https://downloads.cloudflareclient.com/`, only if Cloudflare WARP is missing and you agreed to install it, to download the official installer.
 - `https://github.com/bol-van/zapret2/releases` (the GitHub API as a fallback), to check for and download zapret2 updates. Turn off **Update zapret2 automatically** in Settings to disable this.
 
@@ -104,7 +104,9 @@ WARP itself is a Cloudflare service covered by the [Cloudflare WARP privacy poli
 
 ## How it works
 
-A strategy is a WARP tunnel protocol plus a winws2 profile. During the search Zarp starts winws2 for each strategy, connects WARP via `warp-cli`, waits for `Connected` and checks `cdn-cgi/trace` for `warp=on`. Score is `connect time + 4 × ping`. The fakes are real packets from services that are not blocked (QUIC/TLS for google and vk, STUN), because DPI ignores empty fakes.
+A strategy is a WARP tunnel protocol plus a winws2 profile. During the search Zarp starts winws2 for each strategy, connects WARP via `warp-cli`, waits for `Connected` and checks `cdn-cgi/trace` for `warp=on`. Score is `connect time + 4 × ping`. The fakes are real packets from services that are not blocked (QUIC/TLS for google, vk and gosuslugi), because DPI ignores empty fakes.
+
+The built-in strategies and where their syntax comes from are described in [docs/strategies.md](docs/strategies.md).
 
 App data lives in `%LOCALAPPDATA%\Zarp`: settings, log, extracted zapret2 and `strategies.txt` for your own strategies:
 
@@ -125,7 +127,7 @@ Requires the .NET SDK 6 or later (the target is .NET Framework 4.8). `tools/fetc
 
 GitHub Actions builds every push. A `v*` tag publishes `Zarp.exe`; releases are unsigned until [SignPath is configured](docs/code-signing.md) and the repository variable `SIGNPATH_ENABLED` is set to `true`. Once signing is enabled, a missing configuration or invalid signature stops the release. Release notes report the signing status.
 
-UI regression checks (Windows; no WARP/WinDivert changes). They also open every window in every language and fail on clipped or overlapping text:
+UI regression checks (Windows; no WARP/WinDivert changes). They open every window in every language and fail on clipped or overlapping text, and they run every built-in strategy through the real `winws2 --dry-run`, which parses the parameters without intercepting anything:
 
 ```powershell
 dotnet build tests/Zarp.Tests/Zarp.Tests.csproj -c Release -o build/tests

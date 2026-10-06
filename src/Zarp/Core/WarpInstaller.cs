@@ -4,7 +4,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.RegularExpressions;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -142,14 +142,17 @@ namespace Zarp.Core
             if (!result.Trusted)
                 throw new Exception(L.T("err.warpSignature", result.Problem ?? "unknown"));
             string subject = result.SignerSubject ?? "";
-            if (!IsCloudflareSigner(subject))
+            if (CertificateNames.Organization(result.SignerSubjectRaw) != "Cloudflare, Inc.")
                 throw new Exception(L.T("err.warpSignature", subject.Trim().Length == 0 ? "no signer certificate" : Shorten(subject)));
             return "Cloudflare, Inc.";
         }
 
         /// <summary>Организация в сертификате - ровно «Cloudflare, Inc.», а не любое имя, где это встречается.</summary>
-        internal static bool IsCloudflareSigner(string subject) =>
-            Regex.IsMatch(subject ?? "", "(?:^|,\\s*)O=\"?Cloudflare, Inc\\.\"?(?:,|$)");
+        internal static bool IsCloudflareSigner(string subject)
+        {
+            try { return CertificateNames.Organization(new X500DistinguishedName(subject).RawData) == "Cloudflare, Inc."; }
+            catch (Exception e) when (e is CryptographicException || e is ArgumentException) { return false; }
+        }
 
         static string Shorten(string text)
         {
@@ -191,6 +194,21 @@ namespace Zarp.Core
         internal static async Task<string> DownloadAsync(string url, string file, long minSize, long maxSize,
             TimeSpan stall, IProgress<int> percent, CancellationToken ct)
         {
+            string partial = file + "." + Guid.NewGuid().ToString("N") + ".part";
+            try
+            {
+                string hash = await DownloadCoreAsync(url, partial, minSize, maxSize, stall, percent, ct).ConfigureAwait(false);
+                ct.ThrowIfCancellationRequested();
+                if (File.Exists(file)) File.Replace(partial, file, null);
+                else File.Move(partial, file);
+                return hash;
+            }
+            finally { try { File.Delete(partial); } catch { } }
+        }
+
+        static async Task<string> DownloadCoreAsync(string url, string file, long minSize, long maxSize,
+            TimeSpan stall, IProgress<int> percent, CancellationToken ct)
+        {
             using (var http = new HttpClient { Timeout = TimeSpan.FromSeconds(60) })
             {
                 http.DefaultRequestHeaders.UserAgent.ParseAdd("Zarp/1.0");
@@ -224,6 +242,9 @@ namespace Zarp.Core
                                 while ((n = await src.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false)) > 0)
                                 {
                                     watchdog.CancelAfter(stall);
+                                    ct.ThrowIfCancellationRequested();
+                                    if (n > maxSize - done)
+                                        throw new PermanentDownloadException(L.T("err.warpSize", done + n));
                                     dst.Write(buffer, 0, n);
                                     sha.TransformBlock(buffer, 0, n, null, 0);
                                     done += n;

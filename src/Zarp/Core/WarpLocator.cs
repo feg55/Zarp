@@ -151,11 +151,20 @@ namespace Zarp.Core
             if (r.CliPath != null || string.IsNullOrWhiteSpace(dir)) return;
             try
             {
-                string candidate = Path.Combine(dir, CliName);
+                string candidate = Path.GetFullPath(Path.Combine(dir, CliName));
                 if (File.Exists(candidate))
                 {
-                    r.CliPath = candidate;
-                    r.Report.Add("found: " + candidate);
+                    using (new FileStream(candidate, FileMode.Open, FileAccess.Read, FileShare.Read))
+                    {
+                        var signature = Authenticode.Verify(candidate);
+                        if (!signature.Trusted || CertificateNames.Organization(signature.SignerSubjectRaw) != "Cloudflare, Inc.")
+                        {
+                            r.Report.Add("rejected untrusted CLI: " + candidate);
+                            return;
+                        }
+                        r.CliPath = candidate;
+                        r.Report.Add("found: " + candidate);
+                    }
                 }
             }
             catch { } // недопустимые символы в пути из PATH или реестра

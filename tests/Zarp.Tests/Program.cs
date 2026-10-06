@@ -13,7 +13,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using Zarp.Core;
 
-static class Program
+static partial class Program
 {
     const BindingFlags PrivateInstance = BindingFlags.NonPublic | BindingFlags.Instance;
     const BindingFlags PrivateStatic = BindingFlags.NonPublic | BindingFlags.Static;
@@ -40,10 +40,14 @@ static class Program
         // Tests must never find, start or install the real Cloudflare WARP: the search always comes back empty
         // (individual tests substitute their own results).
         typeof(Warp).GetField("Finder", PrivateStatic).SetValue(null, (Func<WarpLocator.Result>)Missing);
+        typeof(Warp).GetField("VerifyCli", PrivateStatic).SetValue(null, (Func<string, Authenticode.Result>)(_ => TrustedCloudflare()));
         try
         {
             TestConfig();
             TestVpnDetection();
+            TestBuiltInStrategies();
+            TestSearchRules();
+            TestForeignVpnPolicy();
             TestDialog();
             TestClose(cancel: true, remember: true, tray: true);
             TestClose(cancel: false, remember: false, tray: true);
@@ -63,6 +67,7 @@ static class Program
             TestWarpDownload();
             TestEnsureWarp();
             TestInstallHint();
+            TestReviewRegressions();
             CaptureControls();
             Console.WriteLine("PASS: " + _passed + " checks; WARP/WinDivert were not started.");
             watchdog.Dispose();
@@ -345,8 +350,6 @@ static class Program
             Check(restored.DisplayError == "не подтвердилась: нет подключения за 15 с", "Re-check failure must be prefixed");
             L.Apply("de");
             Check(restored.DisplayError == "nicht bestätigt: keine Verbindung innerhalb von 15 s", "Saved error must follow the language");
-            var direct = StrategyCatalog.Load(NewEngine().DataDir).Single(s => s.Id == "direct");
-            Check(direct.Name == "Ohne zapret (direkte Verbindung)", "Built-in strategy name must be translated");
 
             foreach (var code in codes)
             {
@@ -360,6 +363,7 @@ static class Program
                     Application.DoEvents();
                     CheckScanButtons(settings, busy: false, code);
                     CheckLayout(settings, code);
+                    CheckStrategyNames(settings, code);
                     Control ByText(string key) => settings.Controls.Cast<Control>().Single(c => c.Text == L.T(key));
                     int edge = ByText("btn.close").Right;
                     Check(ByText("btn.defender").Right == edge && ByText("btn.checkUpdates").Right == edge,
@@ -436,6 +440,20 @@ static class Program
         {
             L.Apply("en");
         }
+    }
+
+    /// <summary>Названия стратегий (и жирное название выбранной) влезают в колонку списка на любом языке.</summary>
+    static void CheckStrategyNames(Form settings, string code)
+    {
+        var list = (ListView)settings.GetType().GetField("_list", PrivateInstance).GetValue(settings);
+        Check(list.Items.Count >= 10, code + ": the strategy list must be filled");
+        using (var bold = new Font(list.Font, FontStyle.Bold))
+            foreach (ListViewItem item in list.Items)
+            {
+                string name = item.SubItems[1].Text;
+                Check(TextRenderer.MeasureText(name, bold).Width + 16 <= list.Columns[1].Width,
+                    code + ": strategy name \"" + name + "\" does not fit its column");
+            }
     }
 
     static void CheckScanButtons(Form settings, bool busy, string code)
@@ -573,7 +591,7 @@ static class Program
     {
         bool Signer(string subject) => (bool)typeof(WarpInstaller).GetMethod("IsCloudflareSigner", PrivateStatic).Invoke(null, new object[] { subject });
         Check(Signer("CN=\"Cloudflare, Inc.\", O=\"Cloudflare, Inc.\", L=San Francisco, S=California, C=US"), "Real Cloudflare certificate subject");
-        Check(Signer("CN=x, O=Cloudflare, Inc., C=US"), "Unquoted organization");
+        Check(!Signer("CN=x, O=Cloudflare, Inc., C=US"), "Malformed unquoted organization must be rejected");
         Check(!Signer("CN=Cloudflare, Inc., O=Evil Corp, C=US"), "A Cloudflare name outside O= must not count");
         Check(!Signer("CN=a, O=Not Cloudflare, Inc., C=US"), "A longer organization name must not count");
         Check(!Signer("O=Cloudflare, Inc.x"), "Trailing characters must not count");
@@ -607,7 +625,8 @@ static class Program
         var decide = typeof(WarpInstaller).GetMethod("CheckSigner", PrivateStatic);
         string Decide(bool trusted, string problem = null, string subject = null)
         {
-            try { return (string)decide.Invoke(null, new object[] { new Authenticode.Result { Trusted = trusted, Problem = problem, SignerSubject = subject } }); }
+            try { return (string)decide.Invoke(null, new object[] { new Authenticode.Result { Trusted = trusted, Problem = problem, SignerSubject = subject,
+                SignerSubjectRaw = string.IsNullOrEmpty(subject) ? null : new System.Security.Cryptography.X509Certificates.X500DistinguishedName(subject).RawData } }); }
             catch (TargetInvocationException e)
             {
                 // рефлексия оборачивает исключение: достаём настоящее
@@ -724,17 +743,19 @@ static class Program
         }
     }
 
-    /// <summary>Крошечная программа вместо warp-cli.exe: завершается с нужным кодом, что бы ей ни передали.</summary>
-    static string MakeFakeCli(string folder, int exitCode)
+    /// <summary>Крошечная программа вместо настоящей: завершается с нужным кодом, что бы ей ни передали.</summary>
+    static string MakeFakeExe(string folder, string fileName, int exitCode)
     {
         Directory.CreateDirectory(folder);
-        string path = Path.Combine(folder, "warp-cli.exe");
+        string path = Path.Combine(folder, fileName);
         var result = new Microsoft.CSharp.CSharpCodeProvider().CompileAssemblyFromSource(
             new System.CodeDom.Compiler.CompilerParameters { GenerateExecutable = true, OutputAssembly = path },
-            "static class P { static int Main() { return " + exitCode + "; } }");
-        if (result.Errors.HasErrors) throw new Exception("Could not build the fake warp-cli: " + result.Errors[0]);
+            "static class P { static int Main() { System.Console.WriteLine(\"{\\\"status\\\":\\\"Disconnected\\\"}\"); return " + exitCode + "; } }");
+        if (result.Errors.HasErrors) throw new Exception("Could not build the fake " + fileName + ": " + result.Errors[0]);
         return path;
     }
+
+    static string MakeFakeCli(string folder, int exitCode) => MakeFakeExe(folder, "warp-cli.exe", exitCode);
 
     static void TestEnsureWarp()
     {
@@ -811,6 +832,319 @@ static class Program
         }
     }
 
+    // ------------------------------------------------------------------ встроенные стратегии и правила поиска
+
+    static readonly string[] RemovedStrategyIds =
+    {
+        "warp-wg-google6", "warp-wg-stun", "warp-wg-vk10", "warp-wg-google-ttl", "warp-q-google10", "warp-q-vk-ttl", "warp-q-google-bad",
+        "direct", "direct-h2",
+    };
+
+    static readonly Regex BlobReference = new Regex(@"(?:blob|seqovl_pattern)=([A-Za-z0-9_]+)");
+
+    const int StartFailed = -2;
+
+    /// <summary>Разбор параметров настоящим winws2: --dry-run ничего не перехватывает, и права администратора не нужны.</summary>
+    static (int Code, string Output) DryRun(string dir)
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo(Path.Combine(dir, "winws2.exe"), "@zarp.cfg --dry-run")
+        {
+            UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = dir,
+            RedirectStandardOutput = true, RedirectStandardError = true,
+        };
+        psi.EnvironmentVariables["__COMPAT_LAYER"] = "RunAsInvoker"; // манифест просит администратора, а --dry-run он не нужен
+        System.Diagnostics.Process started;
+        try { started = System.Diagnostics.Process.Start(psi); }
+        catch (System.ComponentModel.Win32Exception e) { return (StartFailed, e.Message); } // например, антивирус убрал файл
+        using (var p = started)
+        {
+            var output = p.StandardOutput.ReadToEndAsync();
+            var error = p.StandardError.ReadToEndAsync();
+            if (!p.WaitForExit(30000))
+            {
+                try { p.Kill(); } catch { }
+                return (-1, "winws2 --dry-run did not finish");
+            }
+            return (p.ExitCode, output.Result + error.Result);
+        }
+    }
+
+    /// <summary>
+    /// Набор стратегий, его согласованность с протоколом, блобами и сборкой, а затем разбор параметров
+    /// каждой стратегии настоящим winws2 из вшитого zapret2.
+    /// </summary>
+    static void TestBuiltInStrategies()
+    {
+        var builtIn = StrategyCatalog.BuiltInStrategies;
+        var zapretOnes = builtIn.Where(s => s.UsesZapret).ToList();
+        Check(builtIn.Select(s => s.Id).Distinct().Count() == builtIn.Count, "Strategy ids must be unique");
+        Check(zapretOnes.Count >= 12 && zapretOnes.Count == builtIn.Count,
+            "Every built-in strategy must bypass DPI with zapret: Zarp is for networks where plain WARP does not connect");
+        Check(builtIn.All(s => s.Transport != WarpTransport.WireGuard), "WireGuard strategies are not built in");
+        foreach (var removed in RemovedStrategyIds)
+            Check(builtIn.All(s => s.Id != removed), "Obsolete strategy must stay removed: " + removed);
+        Check(zapretOnes.Count(s => s.Transport == WarpTransport.MasqueH3) >= 5 && zapretOnes.Count(s => s.Transport == WarpTransport.MasqueH2) >= 5,
+            "Both QUIC and TLS strategies must be well represented");
+        Check(zapretOnes.Take(6).Any(s => s.Transport == WarpTransport.MasqueH2),
+            "TLS strategies must appear early enough for a quick scan to reach them");
+
+        var blobs = (Dictionary<string, string>)typeof(Zapret).GetField("Blobs", PrivateStatic).GetValue(null);
+        var markers = new[] { "method", "host", "endhost", "sld", "midsld", "endsld", "sniext", "extlen" };
+        var argsOnly = new Zapret(Path.Combine(_data, "args-only"));
+        foreach (var s in zapretOnes)
+        {
+            string payload = s.Transport == WarpTransport.MasqueH3 ? "--payload=quic_initial" : "--payload=tls_client_hello";
+            Check(s.Args.StartsWith(payload + " --lua-desync="), s.Id + ": the payload must match the transport");
+            Check(!(s.Name + s.Args).Any(c => c == (char)0x2014 || c == (char)0x2013), s.Id + ": no long dashes");
+            var args = argsOnly.BuildArgs(s, true);
+            foreach (var blob in BlobReference.Matches(s.Args).Cast<Match>().Select(m => m.Groups[1].Value).Distinct())
+            {
+                Check(blobs.ContainsKey(blob), s.Id + ": unknown blob " + blob);
+                Check(args.Any(a => a.StartsWith("--blob=" + blob + ":")), s.Id + ": blob " + blob + " must be passed to winws2");
+            }
+            foreach (Match m in Regex.Matches(s.Args, @"\b(?:pos|seqovl)=([^\s:]+)"))
+                foreach (var marker in m.Groups[1].Value.Split(','))
+                    Check(Regex.IsMatch(marker, @"^-?\d+$") || Regex.IsMatch(marker, "^(" + string.Join("|", markers) + @")([+-]\d+)?$"),
+                        s.Id + ": unknown position marker " + marker);
+            // zapret2 молча отменяет seqovl, который не меньше первой позиции разреза: такая стратегия делала бы не то, что написано
+            var disorder = Regex.Match(s.Args, @"multidisorder:(\S*)").Value;
+            var overlap = Regex.Match(disorder, @"seqovl=(\d+)");
+            var first = Regex.Match(disorder, @"pos=([^,:\s]+)");
+            if (overlap.Success && first.Success && int.TryParse(first.Groups[1].Value, out int firstPos))
+                Check(int.Parse(overlap.Groups[1].Value) < firstPos, s.Id + ": multidisorder seqovl must be less than the first split position");
+        }
+
+        // файлы блобов едут в exe: их должен упаковывать tools\fetch-zapret.ps1, иначе стратегия сломается только в готовой сборке
+        string fetch = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "tools", "fetch-zapret.ps1"));
+        if (!File.Exists(fetch))
+            Console.WriteLine("SKIP: " + fetch + " not found, the packed file list was not checked");
+        else
+        {
+            string packed = File.ReadAllText(fetch);
+            foreach (var blob in zapretOnes.SelectMany(s => BlobReference.Matches(s.Args).Cast<Match>().Select(m => m.Groups[1].Value)).Distinct())
+                if (blobs[blob].StartsWith("@files/"))
+                    Check(packed.Contains("'" + blobs[blob].Substring(1) + "'"), "tools/fetch-zapret.ps1 must pack " + blobs[blob].Substring(1) + " (blob " + blob + ")");
+        }
+
+        // настоящий winws2 из вшитого zapret2 разбирает параметры каждой стратегии
+        var embedded = typeof(Zapret).GetField("_embeddedVersion", PrivateStatic);
+        embedded.SetValue(null, null); // остальные проверки идут с выключенным вшитым zapret2
+        try
+        {
+            if (Zapret.EmbeddedVersion == null)
+            {
+                Console.WriteLine("SKIP: Zarp was built without the embedded zapret2, winws2 --dry-run was not run");
+                return;
+            }
+            string dir = Path.Combine(_data, "winws2-dry-run");
+            var real = new Zapret(dir);
+            try { Check(real.ExtractEmbedded() && real.Installed, "The embedded zapret2 must unpack"); }
+            catch (AntivirusBlockedException e)
+            {
+                Console.WriteLine("SKIP: the antivirus blocked the unpacked zapret2 files, winws2 --dry-run was not run: " + e.Message);
+                return;
+            }
+            string cfg = Path.Combine(dir, "zarp.cfg");
+            var utf8 = new System.Text.UTF8Encoding(false);
+            File.WriteAllText(cfg, "--no-such-option=1\n", utf8);
+            var probe = DryRun(dir);
+            if (probe.Code == StartFailed)
+            {
+                Console.WriteLine("SKIP: winws2 could not be started here, winws2 --dry-run was not run: " + probe.Output);
+                return;
+            }
+            Check(probe.Code != 0, "winws2 must reject an unknown option: " + probe.Output);
+            foreach (bool restrict in new[] { true, false })
+                foreach (var s in zapretOnes)
+                {
+                    File.WriteAllText(cfg, real.BuildConfig(s, restrict), utf8);
+                    var run = DryRun(dir);
+                    Check(run.Code == 0 && run.Output.Contains("command line parameters verified"),
+                        s.Id + " (restrict to WARP addresses: " + restrict + "): winws2 rejected the parameters: " + run.Output);
+                }
+
+            // проверка умеет и находить ошибки: помимо неизвестного параметра (выше) - пропавший файл блоба
+            var gosuslugi = zapretOnes.Single(s => s.Id == "warp-t-fake-multi");
+            string blobFile = Path.Combine(dir, "files", "fake", "tls_clienthello_gosuslugi_ru.bin");
+            Check(File.Exists(blobFile), "The embedded zapret2 must carry the gosuslugi blob");
+            File.Move(blobFile, blobFile + ".hidden");
+            File.WriteAllText(cfg, real.BuildConfig(gosuslugi, true), utf8);
+            var missingBlob = DryRun(dir);
+            Check(missingBlob.Code != 0 && missingBlob.Output.Contains("tls_clienthello_gosuslugi_ru.bin"),
+                "A strategy whose blob file is missing must be rejected: " + missingBlob.Output);
+            File.Move(blobFile + ".hidden", blobFile);
+
+            // имена функций и параметров должны существовать в Lua-скриптах этого релиза (dry-run их не проверяет)
+            string lua = File.ReadAllText(Path.Combine(dir, "lua", "zapret-lib.lua")) + "\n" + File.ReadAllText(Path.Combine(dir, "lua", "zapret-antidpi.lua"));
+            foreach (var s in zapretOnes)
+                foreach (Match call in Regex.Matches(s.Args, @"--lua-desync=([A-Za-z0-9_]+)((?::[^\s:=]+(?:=[^\s:]*)?)*)"))
+                {
+                    string function = call.Groups[1].Value;
+                    Check(Regex.IsMatch(lua, @"\bfunction\s+" + function + @"\s*\("), s.Id + ": zapret2 " + Zapret.EmbeddedVersion + " has no desync function " + function);
+                    foreach (var arg in call.Groups[2].Value.Split(new[] { ':' }, StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        string name = arg.Split('=')[0];
+                        Check(Regex.IsMatch(lua, @"\b" + Regex.Escape(name) + @"\b"), s.Id + ": " + function + " has no argument " + name + " in zapret2 " + Zapret.EmbeddedVersion);
+                    }
+                }
+
+            // установленный zapret2 той же версии получает файлы, которых в нём нет (новый фейк после обновления Zarp), и не теряет свои
+            string stun = Path.Combine(dir, "files", "fake", "stun.bin");
+            File.WriteAllText(stun, "newer");
+            File.Delete(blobFile);
+            Check(!real.EmbeddedIsNewer, "The same release is not newer than the installed one");
+            Check(real.ExtractEmbedded() && File.Exists(blobFile), "A file missing from an up-to-date install must be restored");
+            Check(File.ReadAllText(stun) == "newer", "Files that are already there must not be overwritten");
+            Check(!real.ExtractEmbedded(), "Nothing is restored when nothing is missing");
+        }
+        finally
+        {
+            embedded.SetValue(null, "");
+        }
+    }
+
+    /// <summary>Из подтверждённых стратегий берётся самая быстрая: меньше подключение и пинг - лучше.</summary>
+    static void TestSearchRules()
+    {
+        var engine = NewEngine();
+        void Result(string id, int connect, int ping, bool ok = true, bool confirmed = true) =>
+            engine.Config.Results[id] = new TestResult { StrategyId = id, Ok = ok, Confirmed = confirmed, ConnectMs = connect, PingMs = ping };
+        Result("warp-q-google6", 1000, 50);                 // 1200
+        Result("warp-q-google3", 300, 25);                  // 400
+        Result("warp-t-seqovl", 100, 10, confirmed: false); // быстрая, но не подтверждена
+        Result("warp-q-vk6", 100, 10, ok: false);           // не работает
+        var confirmed = typeof(Engine).GetMethod("ConfirmedStrategies", PrivateInstance);
+        List<string> Order(Strategy except) =>
+            ((List<Strategy>)confirmed.Invoke(engine, new object[] { except })).Select(s => s.Id).ToList();
+        Check(Order(null).SequenceEqual(new[] { "warp-q-google3", "warp-q-google6" }),
+            "Only confirmed strategies, fastest first; got " + string.Join(", ", Order(null)));
+        // стратегия, которая только что не подключилась, заново не предлагается
+        Check(Order(engine.Strategies.Single(s => s.Id == "warp-q-google3")).SequenceEqual(new[] { "warp-q-google6" }),
+            "The strategy that just failed must be left out");
+    }
+
+    static void Wait(Func<Task> body) => Task.Run(body).GetAwaiter().GetResult();
+
+    /// <summary>
+    /// Через сторонний VPN проверки измеряют этот VPN, а не сеть. Поиск стратегии там отказывается работать,
+    /// а неудачи не стирают сохранённые результаты: так пропали рабочие стратегии при включённом Happ.
+    /// </summary>
+    static void TestForeignVpnPolicy()
+    {
+        string cli = MakeFakeCli(Path.Combine(_data, "policy-cli"), 0);
+        string brokenWinws = MakeFakeExe(Path.Combine(_data, "policy-winws"), "winws2.exe", 1);
+        var vpn = new List<string> { "happ-tun (sing-tun)" };
+        var noVpn = new List<string>();
+        var lines = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        Action<string> sink = lines.Enqueue;
+        bool Logged(string text) => lines.Any(l => l.Contains(text));
+        string QuickScanLine(Engine e) => L.T("log.searchQuick", e.Strategies.Count, e.QuickStopAfter);
+
+        // стратегия без zapret, как строка strategies.txt с пустыми аргументами: проверка не запускает процессов и кончается за секунду
+        var plain = new Strategy { Id = "plain", Name = "plain", Transport = WarpTransport.MasqueH3, Args = "" };
+        Strategy Builtin(string id) => StrategyCatalog.BuiltInStrategies.Single(s => s.Id == id).Clone();
+
+        // движок с «установленными» WARP (warp-cli отвечает кодом 0) и zapret2 (winws2 сразу завершается с ошибкой);
+        // у каждой стратегии уже есть подтверждённый хороший результат
+        Engine Ready(string selected, params Strategy[] strategies)
+        {
+            SetFinder(() => Found(cli));
+            var e = NewEngine();
+            e.Warp.Locate();
+            Directory.CreateDirectory(Path.Combine(e.Zapret.Dir, "lua"));
+            File.Copy(brokenWinws, e.Zapret.Exe, true);
+            foreach (var f in new[] { "cygwin1.dll", "WinDivert.dll", "WinDivert64.sys", @"lua\zapret-lib.lua", @"lua\zapret-antidpi.lua", "version.txt" })
+                File.WriteAllText(Path.Combine(e.Zapret.Dir, f), "stub");
+            typeof(Engine).GetProperty("Strategies").SetValue(e, strategies.ToList());
+            typeof(Warp).GetField("_transport", PrivateInstance).SetValue(e.Warp, WarpTransport.MasqueH3); // не ждать смены протокола
+            e.Config.TestTimeoutSec = 1;
+            e.Config.SelectedStrategyId = selected;
+            foreach (var s in strategies)
+                e.Config.Results[s.Id] = new TestResult { StrategyId = s.Id, Ok = true, Confirmed = true, ConnectMs = 900, PingMs = 40, When = DateTime.Now };
+            while (lines.TryDequeue(out _)) { }
+            return e;
+        }
+        // найденные VPN подменяются: результат не должен зависеть от того, что включено на этом компьютере
+        var findVpns = typeof(Engine).GetField("FindForeignVpns", PrivateInstance);
+        void Vpns(Engine e, List<string> adapters) => findVpns.SetValue(e, (Func<List<string>>)(() => adapters));
+        bool Intact(Engine e, string id)
+        {
+            var r = e.Config.Results[id];
+            return r.Ok && r.Confirmed && r.ConnectMs == 900 && r.PingMs == 40;
+        }
+
+        Log.Line += sink;
+        try
+        {
+            // поиск при чужом VPN: пользователь отказался, а без вопроса (автозапуск, нет окна) - тоже отказ
+            var asked = new List<bool>();
+            var engine = Ready("plain", plain);
+            Vpns(engine, vpn);
+            engine.AskContinueWithVpn = (adapters, searching) => { asked.Add(searching); return !searching; };
+            Wait(() => engine.SearchAsync(full: false));
+            Check(asked.SequenceEqual(new[] { true }), "The search must tell the question that it is a search");
+            Check(engine.State == EngineState.Idle && engine.Detail == L.T("detail.vpnOff"), "A declined search must ask to turn the VPN off: " + engine.Detail);
+            Check(Logged(L.T("log.vpnNoSearch")) && !Logged(QuickScanLine(engine)), "No search may start through another VPN");
+            Check(Intact(engine, "plain"), "A declined search must not touch the results");
+
+            engine = Ready("plain", plain);
+            Vpns(engine, vpn); // обработчика вопроса нет
+            Wait(() => engine.SearchAsync(full: true));
+            Check(engine.Detail == L.T("detail.vpnOff") && !Logged(L.T("log.searchFull", engine.Strategies.Count, 0)) && Intact(engine, "plain"),
+                "Without anyone to ask, a search through another VPN must not start");
+
+            // пользователь настоял: проверки идут, но неудача не стирает прежний подтверждённый результат
+            engine = Ready("plain", plain);
+            Vpns(engine, vpn);
+            engine.AskContinueWithVpn = (adapters, searching) => true;
+            Wait(() => engine.SearchAsync(full: false));
+            Check(Logged(QuickScanLine(engine)), "A search the user insisted on must run");
+            Check(Intact(engine, "plain"), "A failure through another VPN must not overwrite a confirmed result");
+            Check(engine.State == EngineState.Idle && engine.Detail == L.T("detail.vpnOff") && Logged(L.T("log.vpnConnectFailed")),
+                "A fruitless search through another VPN must say why: " + engine.Detail);
+
+            // без VPN всё как раньше: неудача записывается
+            engine = Ready("plain", plain);
+            Vpns(engine, noVpn);
+            Wait(() => engine.SearchAsync(full: false));
+            Check(!engine.Config.Results["plain"].Ok && engine.Detail == L.T("detail.notFound"), "Without another VPN a failed check is stored as usual: " + engine.Detail);
+
+            // подключение с выбранной стратегией разрешено и при чужом VPN, но если не вышло - ни переписывания результатов, ни нового поиска
+            engine = Ready("warp-q-google6", Builtin("warp-q-google6"));
+            Vpns(engine, vpn);
+            Wait(() => engine.ConnectAsync());
+            Check(Intact(engine, "warp-q-google6"), "A failed connection through another VPN must not discredit the saved strategy");
+            Check(engine.State == EngineState.Idle && engine.Detail == L.T("detail.vpnOff") && Logged(L.T("log.vpnConnectFailed")) && !Logged(QuickScanLine(engine)),
+                "A failed connection through another VPN must not start a new search: " + engine.Detail);
+
+            // MarkFailed отдельно: с VPN молчит, без него отмечает
+            var mark = typeof(Engine).GetMethod("MarkFailed", PrivateInstance);
+            var flag = typeof(Engine).GetField("_foreignVpn", PrivateInstance);
+            engine = Ready("plain", plain);
+            var strategy = engine.Strategies.Single();
+            flag.SetValue(engine, true);
+            mark.Invoke(engine, new object[] { strategy });
+            Check(Intact(engine, "plain"), "MarkFailed must do nothing through another VPN");
+            flag.SetValue(engine, false);
+            mark.Invoke(engine, new object[] { strategy });
+            Check(!engine.Config.Results["plain"].Ok, "MarkFailed must record the failure otherwise");
+        }
+        finally
+        {
+            Log.Line -= sink;
+            SetFinder(Missing);
+        }
+
+        // автозапуск: окна нет, спрашивать некого. Подключиться с выбранной стратегией можно, подбирать новую через чужой VPN нельзя
+        using (var hidden = NewForm("MainForm", NewEngine(), true, false))
+        {
+            var ask = hidden.GetType().GetMethod("AskVpn", PrivateInstance);
+            Check(!hidden.Visible, "An autostarted window is hidden");
+            Check((bool)ask.Invoke(hidden, new object[] { vpn, false }), "Autostart may connect with the saved strategy through another VPN");
+            Check(!(bool)ask.Invoke(hidden, new object[] { vpn, true }), "Autostart must not search for a strategy through another VPN");
+        }
+    }
+
     static void TestInstallHint()
     {
         var engine = NewEngine();
@@ -883,6 +1217,13 @@ static class Program
 
                     switch (path)
                     {
+                        case "/chunked":
+                            var chunkHead = System.Text.Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n" + _payload.Length.ToString("x") + "\r\n");
+                            stream.Write(chunkHead, 0, chunkHead.Length);
+                            stream.Write(_payload, 0, _payload.Length);
+                            var chunkEnd = System.Text.Encoding.ASCII.GetBytes("\r\n0\r\n\r\n");
+                            stream.Write(chunkEnd, 0, chunkEnd.Length);
+                            break;
                         case "/ok":
                             Headers("200 OK", _payload.Length);
                             stream.Write(_payload, 0, _payload.Length);

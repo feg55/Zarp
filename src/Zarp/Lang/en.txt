@@ -34,6 +34,7 @@ tray.bgText = It lives in the tray now. To quit: right-click → Exit.
 # ---- dialogs
 dlg.antivirus = The antivirus (usually Windows Defender) blocked the zapret2 files.\n\nThis is a known false positive for the WinDivert driver that zapret uses to intercept traffic.\n\nAdd the folder to Windows Defender exclusions and try again?\n\n{0}
 dlg.vpn = Another VPN is on:\n\n{0}\n\nWARP traffic will go through it and zapret won't affect it: WARP may fail to connect and the chosen strategy will be wrong.\n\nIt's better to turn this VPN off. Continue anyway?
+dlg.vpnSearch = Another VPN is on:\n\n{0}\n\nZarp picks a strategy by testing how WARP connects. Through another VPN every test measures that VPN, not your network, so all strategies will look broken and the result will be useless.\n\nTurn the VPN off completely (quit its app), then try again. Search anyway?
 dlg.defender = Add the zapret2 folder to Windows Defender exclusions?\n\n{0}
 dlg.otherCopy = Another copy of Zarp is already running:\n\n{0}\n\nClose it and open this one? If WARP is connected, Zarp will reconnect it.
 dlg.otherCopies = Other copies of Zarp are already running:\n\n{0}\n\nClose them and open this one? If WARP is connected, Zarp will reconnect it.
@@ -85,7 +86,7 @@ opt.closeExit = Exit the app
 opt.closeAccessible = Action when the window is closed
 opt.disconnectOnExit = Disconnect WARP on exit
 opt.restrict = Intercept WARP addresses only
-opt.isolate = Isolate tests (new endpoint for each)
+opt.isolate = Use another endpoint for rechecks
 opt.autoUpdate = Update zapret2 automatically
 opt.timeout = Connection timeout, s
 opt.stopAfter = Quick scan: working\nstrategies to find
@@ -95,8 +96,6 @@ result.works2 = works ✔✔
 result.works1 = works (1 check)
 result.notConfirmed = not confirmed: {0}
 result.applyFailed = failed to connect when applied
-
-strategy.direct = No zapret (direct connection)
 
 # ---- status line under the button
 detail.disconnecting = Disconnecting...
@@ -153,6 +152,8 @@ log.noWarpCli = warp-cli.exe not found. Install Cloudflare WARP: https://one.one
 log.otherDpi = Warning: another DPI bypass tool is running and may interfere: {0}
 log.otherVpn = Warning: another VPN is active and WARP traffic goes through it: {0}
 log.vpnAdvice = Turn off the other VPN, otherwise WARP may not connect and the strategy will be chosen wrongly.
+log.vpnNoSearch = Another VPN is on, so a strategy search would only measure that VPN, not your network. Turn it off completely and search again.
+log.vpnConnectFailed = WARP did not connect while another VPN was on. The saved results were not changed. Turn the VPN off completely and try again.
 log.downloadFailed = Could not download zapret2: {0}
 log.manualInstall = You can extract it manually: put {0} into {1}
 log.searchQuick = Quick scan: {0} strategies, stop after {1} working
@@ -161,7 +162,7 @@ log.searchSelected = Testing selected: {0}
 log.testOk = ✔ {0}: connection {1} ms, ping {2} ms
 log.testFail = ✘ {0}: {1}
 log.recheck = Candidates to re-check: {0}
-log.recheckOk = ✔✔ {0}: confirmed (connection {1} ms, ping {2} ms)
+log.recheckOk = {0}: confirmed (connection {1} ms, ping {2} ms)
 log.candidatesFailed = The candidates failed the re-check, they probably passed by chance. Search again or increase the timeout.
 log.noneWorked = No strategy worked. Increase the timeout in settings or add your own strategies to {0}
 log.best = Best strategy: {0} (connection {1} ms, ping {2} ms)
@@ -216,3 +217,11 @@ log.warpInstalled = Cloudflare WARP installed: {0}
 log.warpInstallFailed = Cloudflare WARP installation failed: {0}
 log.warpManual = Install Cloudflare WARP yourself from https://one.one.one.one/ (or run: winget install Cloudflare.Warp). If that site is blocked, get Cloudflare_WARP.msi any other way and put it into {0}, then press the button again.
 log.warpRestart = Windows asks for a restart to finish installing Cloudflare WARP.
+
+err.endpoint = Could not change the WARP endpoint.
+err.transport = WARP did not confirm the transport change.
+err.warpCommand = warp-cli failed ({0}): {1}
+err.disconnect = WARP did not confirm disconnection.
+status.unknown = Connection unverified
+detail.connectionUnknown = Could not verify WARP status: {0}
+result.worksRepeated = works (2 checks)
