@@ -54,11 +54,31 @@ jobs:
       - name: Build
         run: dotnet build src/Zarp/Zarp.csproj -c Release -o out "-p:Version=${{ steps.ver.outputs.version }}"
 
-      - name: Build UI regression checks
+      - name: Build regression tests
         run: dotnet build tests/Zarp.Tests/Zarp.Tests.csproj -c Release -o build/tests "-p:Version=${{ steps.ver.outputs.version }}"
 
-      - name: Check close behavior and VPN detection
-        run: ./build/tests/Zarp.Tests.exe
+      - name: Run regression tests
+        id: regression_tests
+        timeout-minutes: 15
+        run: ./build/tests/Zarp.Tests.exe --results ./build/test-results
+
+      - name: Publish test summary
+        if: always() && steps.regression_tests.outcome != 'skipped'
+        shell: pwsh
+        run: |
+          if (Test-Path -LiteralPath build/test-results/summary.md) {
+            Get-Content -LiteralPath build/test-results/summary.md -Raw |
+              Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          }
+
+      - name: Upload test results and diagnostics
+        if: always() && steps.regression_tests.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: zarp-test-results
+          path: build/test-results/
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Check unsigned release rejection
         shell: pwsh

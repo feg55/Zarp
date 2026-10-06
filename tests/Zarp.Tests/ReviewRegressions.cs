@@ -28,17 +28,6 @@ static partial class Program
     static T GetPrivate<T>(object target, string name) => (T)target.GetType().GetField(name, PrivateInstance).GetValue(target);
     static Strategy PlainStrategy(string id) => new Strategy { Id = id, Name = id, Transport = WarpTransport.MasqueH2, Args = "" };
 
-    static void TestReviewRegressions()
-    {
-        TestSignerStructure();
-        TestConfigRecoveryAndCustomIds();
-        Wait(TestEngineRegressionsAsync);
-        Wait(TestProcessesAndUpdatesAsync);
-        Wait(TestDownloadRegressionsAsync);
-        TestUiRegressions();
-        SetFinder(Missing);
-    }
-
     static void TestSignerStructure()
     {
         var parse = AppAssembly.GetType("Zarp.Core.CertificateNames").GetMethod("Organization");
@@ -388,7 +377,7 @@ Console.WriteLine(""parent finished""); }}");
     }
 
     [DllImport("user32.dll")] static extern int GetGuiResources(IntPtr process, int flags);
-    static void TestUiRegressions()
+    static void TestAutostartStaysInTray()
     {
         var mock = new MockWarp(PlainStrategy("autostart"));
         mock.Engine.Config.SelectedStrategyId = "autostart";
@@ -399,6 +388,10 @@ Console.WriteLine(""parent finished""); }}");
             Check(!hidden.Visible && !mock.Calls.Contains("connect"), "Autostart stays in the tray without overriding AutoConnectOnStart=false");
             Wait(() => mock.Engine.ShutdownAsync());
         }
+    }
+
+    static void TestAutostartToggle()
+    {
         using (var settings = NewForm("SettingsForm", NewEngine()))
         {
             PositionOffscreen(settings); settings.Show();
@@ -416,7 +409,10 @@ Console.WriteLine(""parent finished""); }}");
             pending.SetResult(true); PumpUntil(() => toggle.Enabled, "Autostart update");
             Check((bool)checkedProperty.GetValue(toggle) == requested, "The switch reconciles the actual scheduler state");
         }
-        TestLogLayout();
+    }
+
+    static void TestPowerAccessibilityAndSessionEnd()
+    {
         using (var form = NewMain(NewEngine()))
         {
             var button = GetPrivate<Button>(form, "_power"); int clicked = 0;
@@ -428,6 +424,10 @@ Console.WriteLine(""parent finished""); }}");
             form.GetType().GetMethod("OnFormClosing", PrivateInstance).Invoke(form, new object[] { closing });
             Check(!closing.Cancel, "Windows session ending is not cancelled");
         }
+    }
+
+    static void TestIconResources()
+    {
         var create = AppAssembly.GetType("Zarp.UI.Theme").GetMethod("AppIcon");
         using (var warmup = (Icon)create.Invoke(null, new object[] { 32, Color.Orange })) { }
         int before = GetGuiResources(Process.GetCurrentProcess().Handle, 1);
@@ -496,11 +496,8 @@ Console.WriteLine(""parent finished""); }}");
         public void Dispose() => ReleaseHandle();
     }
 
-    static void TestLogLayout()
+    static void TestLogLayout(int maximumClientHeight, float scale, int adjustment)
     {
-        foreach (int maximumClientHeight in new[] { 0, 749, 600 })
-        foreach (float scale in new[] { 1f, 1.25f, 1.5f, 1.75f, 2f })
-        foreach (int adjustment in new[] { 0, -100, 7 })
         using (var form = NewMain(NewEngine()))
         using (var limit = new WindowHeightLimit(form, maximumClientHeight))
         {
@@ -543,8 +540,10 @@ Console.WriteLine(""parent finished""); }}");
             }
         }
 
-        foreach (int maximumClientHeight in new[] { 0, 749, 600 })
-        foreach (float scale in new[] { 1.25f, 2f })
+    }
+
+    static void TestLogScalingWhileExpanded(int maximumClientHeight, float scale)
+    {
         using (var form = NewMain(NewEngine()))
         using (var reference = NewMain(NewEngine()))
         using (var limit = new WindowHeightLimit(form, maximumClientHeight))

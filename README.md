@@ -131,8 +131,10 @@ UI regression checks (Windows; no WARP/WinDivert changes). They open every windo
 
 ```powershell
 dotnet build tests/Zarp.Tests/Zarp.Tests.csproj -c Release -o build/tests
-.\build\tests\Zarp.Tests.exe
+.\build\tests\Zarp.Tests.exe --results build/test-results
 ```
+
+Tests run independently and continue after failures. GitHub Actions shows the failed cases in the run summary and uploads the `zarp-test-results` artifact even when tests fail. It includes JUnit XML, stdout/stderr, exit codes and the exact winws2 configurations. See [test reporting and targeted runs](docs/testing.md).
 
 ### Translations
 

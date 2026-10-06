@@ -19,70 +19,32 @@ static partial class Program
     const BindingFlags PrivateStatic = BindingFlags.NonPublic | BindingFlags.Static;
     static readonly Assembly AppAssembly = typeof(Engine).Assembly;
     static string _data;
+    static string _artifacts;
     static int _passed;
 
     [STAThread]
-    static int Main()
+    static int Main(string[] args) => RunTests(args);
+
+    static void InitializeTest()
     {
         _data = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "test-data", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_data);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
-        var watchdog = new System.Threading.Timer(_ =>
-        {
-            Console.Error.WriteLine("FAIL: checks did not finish within 120 seconds.");
-            Environment.Exit(1);
-        }, null, 120000, System.Threading.Timeout.Infinite);
-
         // Isolate UI tests from embedded driver extraction, WARP, and background downloads.
         typeof(Zapret).GetField("_embeddedVersion", BindingFlags.NonPublic | BindingFlags.Static).SetValue(null, "");
         // Tests must never find, start or install the real Cloudflare WARP: the search always comes back empty
         // (individual tests substitute their own results).
         typeof(Warp).GetField("Finder", PrivateStatic).SetValue(null, (Func<WarpLocator.Result>)Missing);
         typeof(Warp).GetField("VerifyCli", PrivateStatic).SetValue(null, (Func<string, Authenticode.Result>)(_ => TrustedCloudflare()));
-        try
-        {
-            TestConfig();
-            TestVpnDetection();
-            TestBuiltInStrategies();
-            TestSearchRules();
-            TestForeignVpnPolicy();
-            TestDialog();
-            TestClose(cancel: true, remember: true, tray: true);
-            TestClose(cancel: false, remember: false, tray: true);
-            TestClose(cancel: false, remember: true, tray: true);
-            TestClose(cancel: false, remember: false, tray: false);
-            TestClose(cancel: false, remember: true, tray: false);
-            TestSavedAction(tray: true);
-            TestSavedAction(tray: false);
-            TestExplicitExit();
-            TestExitDuringPrompt();
-            TestShutdownDuringOperation();
-            TestSettings();
-            TestLocalization();
-            TestKeysUsedInCode();
-            TestWarpLocator();
-            TestWarpInstaller();
-            TestWarpDownload();
-            TestEnsureWarp();
-            TestInstallHint();
-            TestReviewRegressions();
-            CaptureControls();
-            Console.WriteLine("PASS: " + _passed + " checks; WARP/WinDivert were not started.");
-            watchdog.Dispose();
-            return 0;
-        }
-        catch (Exception e)
-        {
-            Console.Error.WriteLine(e);
-            return 1;
-        }
     }
 
-    static void Check(bool condition, string message)
+    static void Check(bool condition, string message,
+        [System.Runtime.CompilerServices.CallerFilePath] string file = "",
+        [System.Runtime.CompilerServices.CallerLineNumber] int line = 0)
     {
-        if (!condition) throw new Exception(message);
+        if (!condition) throw new TestAssertionException(message, file, line);
         _passed++;
     }
 
@@ -508,10 +470,7 @@ static partial class Program
     {
         string src = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "src", "Zarp"));
         if (!Directory.Exists(src))
-        {
-            Console.WriteLine("SKIP: sources not found at " + src + ", key usage was not checked");
-            return;
-        }
+            throw new TestSkippedException("Sources not found at " + src + ", key usage was not checked");
         var pattern = new Regex("\"((?:main|lang|status|hint|tray|dlg|close|settings|col|btn|tip|opt|result|strategy|detail|progress|err|log)\\.[A-Za-z0-9]+)\"");
         var used = new HashSet<string>(Directory.GetFiles(src, "*.cs", SearchOption.AllDirectories)
             .SelectMany(f => pattern.Matches(File.ReadAllText(f)).Cast<Match>().Select(m => m.Groups[1].Value)));
@@ -668,23 +627,21 @@ static partial class Program
         Check(!Authenticode.Verify(Path.Combine(Environment.SystemDirectory, "cmd.exe")).Trusted, "A catalog-signed system file has no embedded signature for Cloudflare");
         var missingFile = Authenticode.Verify(Path.Combine(_data, "does-not-exist.msi"));
         Check(!missingFile.Trusted && missingFile.Problem != null, "A missing file must be rejected: " + missingFile.Problem);
+    }
+
+    static void TestOtherPublisherSignature()
+    {
         // файл с настоящей встроенной подписью другого издателя (dotnet.exe от Microsoft): подпись действительна, но не Cloudflare
         string dotnet = new[] { Environment.GetEnvironmentVariable("DOTNET_ROOT"), Path.Combine(Environment.GetEnvironmentVariable("ProgramFiles") ?? "", "dotnet") }
             .Where(d => !string.IsNullOrEmpty(d)).Select(d => Path.Combine(d, "dotnet.exe")).FirstOrDefault(File.Exists);
         if (dotnet == null)
-            Console.WriteLine("SKIP: dotnet.exe not found, the check with a third-party embedded signature was not run");
-        else
-        {
-            var other = Authenticode.Verify(dotnet);
-            if (!other.Trusted)
-                Console.WriteLine("SKIP: dotnet.exe signature is not trusted on this machine (" + other.Problem + ")");
-            else
-            {
-                Check(other.SignerSubject != null && other.SignerSubject.Contains("Microsoft"), "The signer of dotnet.exe must be read: " + other.SignerSubject);
-                var notCloudflare = Catch(() => Sync(() => (Task<string>)typeof(WarpInstaller).GetMethod("VerifySignatureAsync", PrivateStatic).Invoke(null, new object[] { dotnet })));
-                Check(notCloudflare != null && notCloudflare.Message.Contains("Microsoft"), "A valid signature of another publisher must be rejected: " + notCloudflare?.Message);
-            }
-        }
+            throw new TestSkippedException("dotnet.exe not found, the check with a third-party embedded signature was not run");
+        var other = Authenticode.Verify(dotnet);
+        if (!other.Trusted)
+            throw new TestSkippedException("dotnet.exe signature is not trusted on this machine (" + other.Problem + ")");
+        Check(other.SignerSubject != null && other.SignerSubject.Contains("Microsoft"), "The signer of dotnet.exe must be read: " + other.SignerSubject);
+        var notCloudflare = Catch(() => Sync(() => (Task<string>)typeof(WarpInstaller).GetMethod("VerifySignatureAsync", PrivateStatic).Invoke(null, new object[] { dotnet })));
+        Check(notCloudflare != null && notCloudflare.Message.Contains("Microsoft"), "A valid signature of another publisher must be rejected: " + notCloudflare?.Message);
     }
 
     static void TestWarpDownload()
@@ -842,33 +799,6 @@ static partial class Program
 
     static readonly Regex BlobReference = new Regex(@"(?:blob|seqovl_pattern)=([A-Za-z0-9_]+)");
 
-    const int StartFailed = -2;
-
-    /// <summary>Разбор параметров настоящим winws2: --dry-run ничего не перехватывает, и права администратора не нужны.</summary>
-    static (int Code, string Output) DryRun(string dir)
-    {
-        var psi = new System.Diagnostics.ProcessStartInfo(Path.Combine(dir, "winws2.exe"), "@zarp.cfg --dry-run")
-        {
-            UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = dir,
-            RedirectStandardOutput = true, RedirectStandardError = true,
-        };
-        psi.EnvironmentVariables["__COMPAT_LAYER"] = "RunAsInvoker"; // манифест просит администратора, а --dry-run он не нужен
-        System.Diagnostics.Process started;
-        try { started = System.Diagnostics.Process.Start(psi); }
-        catch (System.ComponentModel.Win32Exception e) { return (StartFailed, e.Message); } // например, антивирус убрал файл
-        using (var p = started)
-        {
-            var output = p.StandardOutput.ReadToEndAsync();
-            var error = p.StandardError.ReadToEndAsync();
-            if (!p.WaitForExit(30000))
-            {
-                try { p.Kill(); } catch { }
-                return (-1, "winws2 --dry-run did not finish");
-            }
-            return (p.ExitCode, output.Result + error.Result);
-        }
-    }
-
     /// <summary>
     /// Набор стратегий, его согласованность с протоколом, блобами и сборкой, а затем разбор параметров
     /// каждой стратегии настоящим winws2 из вшитого zapret2.
@@ -914,10 +844,16 @@ static partial class Program
                 Check(int.Parse(overlap.Groups[1].Value) < firstPos, s.Id + ": multidisorder seqovl must be less than the first split position");
         }
 
+    }
+
+    static void TestPackedStrategyFiles()
+    {
+        var zapretOnes = StrategyCatalog.BuiltInStrategies.Where(s => s.UsesZapret);
+        var blobs = (Dictionary<string, string>)typeof(Zapret).GetField("Blobs", PrivateStatic).GetValue(null);
         // файлы блобов едут в exe: их должен упаковывать tools\fetch-zapret.ps1, иначе стратегия сломается только в готовой сборке
         string fetch = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "tools", "fetch-zapret.ps1"));
         if (!File.Exists(fetch))
-            Console.WriteLine("SKIP: " + fetch + " not found, the packed file list was not checked");
+            throw new TestSkippedException(fetch + " not found, the packed file list was not checked");
         else
         {
             string packed = File.ReadAllText(fetch);
@@ -926,82 +862,113 @@ static partial class Program
                     Check(packed.Contains("'" + blobs[blob].Substring(1) + "'"), "tools/fetch-zapret.ps1 must pack " + blobs[blob].Substring(1) + " (blob " + blob + ")");
         }
 
-        // настоящий winws2 из вшитого zapret2 разбирает параметры каждой стратегии
+    }
+
+    static void WithEmbeddedZapret(Action<Zapret> test)
+    {
         var embedded = typeof(Zapret).GetField("_embeddedVersion", PrivateStatic);
         embedded.SetValue(null, null); // остальные проверки идут с выключенным вшитым zapret2
         try
         {
             if (Zapret.EmbeddedVersion == null)
             {
-                Console.WriteLine("SKIP: Zarp was built without the embedded zapret2, winws2 --dry-run was not run");
-                return;
+                throw new TestSkippedException("Zarp was built without embedded zapret2; run tools/fetch-zapret.ps1 before building.");
             }
             string dir = Path.Combine(_data, "winws2-dry-run");
             var real = new Zapret(dir);
-            try { Check(real.ExtractEmbedded() && real.Installed, "The embedded zapret2 must unpack"); }
-            catch (AntivirusBlockedException e)
-            {
-                Console.WriteLine("SKIP: the antivirus blocked the unpacked zapret2 files, winws2 --dry-run was not run: " + e.Message);
-                return;
-            }
-            string cfg = Path.Combine(dir, "zarp.cfg");
-            var utf8 = new System.Text.UTF8Encoding(false);
-            File.WriteAllText(cfg, "--no-such-option=1\n", utf8);
-            var probe = DryRun(dir);
-            if (probe.Code == StartFailed)
-            {
-                Console.WriteLine("SKIP: winws2 could not be started here, winws2 --dry-run was not run: " + probe.Output);
-                return;
-            }
-            Check(probe.Code != 0, "winws2 must reject an unknown option: " + probe.Output);
-            foreach (bool restrict in new[] { true, false })
-                foreach (var s in zapretOnes)
-                {
-                    File.WriteAllText(cfg, real.BuildConfig(s, restrict), utf8);
-                    var run = DryRun(dir);
-                    Check(run.Code == 0 && run.Output.Contains("command line parameters verified"),
-                        s.Id + " (restrict to WARP addresses: " + restrict + "): winws2 rejected the parameters: " + run.Output);
-                }
-
-            // проверка умеет и находить ошибки: помимо неизвестного параметра (выше) - пропавший файл блоба
-            var gosuslugi = zapretOnes.Single(s => s.Id == "warp-t-fake-multi");
-            string blobFile = Path.Combine(dir, "files", "fake", "tls_clienthello_gosuslugi_ru.bin");
-            Check(File.Exists(blobFile), "The embedded zapret2 must carry the gosuslugi blob");
-            File.Move(blobFile, blobFile + ".hidden");
-            File.WriteAllText(cfg, real.BuildConfig(gosuslugi, true), utf8);
-            var missingBlob = DryRun(dir);
-            Check(missingBlob.Code != 0 && missingBlob.Output.Contains("tls_clienthello_gosuslugi_ru.bin"),
-                "A strategy whose blob file is missing must be rejected: " + missingBlob.Output);
-            File.Move(blobFile + ".hidden", blobFile);
-
-            // имена функций и параметров должны существовать в Lua-скриптах этого релиза (dry-run их не проверяет)
-            string lua = File.ReadAllText(Path.Combine(dir, "lua", "zapret-lib.lua")) + "\n" + File.ReadAllText(Path.Combine(dir, "lua", "zapret-antidpi.lua"));
-            foreach (var s in zapretOnes)
-                foreach (Match call in Regex.Matches(s.Args, @"--lua-desync=([A-Za-z0-9_]+)((?::[^\s:=]+(?:=[^\s:]*)?)*)"))
-                {
-                    string function = call.Groups[1].Value;
-                    Check(Regex.IsMatch(lua, @"\bfunction\s+" + function + @"\s*\("), s.Id + ": zapret2 " + Zapret.EmbeddedVersion + " has no desync function " + function);
-                    foreach (var arg in call.Groups[2].Value.Split(new[] { ':' }, StringSplitOptions.RemoveEmptyEntries))
-                    {
-                        string name = arg.Split('=')[0];
-                        Check(Regex.IsMatch(lua, @"\b" + Regex.Escape(name) + @"\b"), s.Id + ": " + function + " has no argument " + name + " in zapret2 " + Zapret.EmbeddedVersion);
-                    }
-                }
-
-            // установленный zapret2 той же версии получает файлы, которых в нём нет (новый фейк после обновления Zarp), и не теряет свои
-            string stun = Path.Combine(dir, "files", "fake", "stun.bin");
-            File.WriteAllText(stun, "newer");
-            File.Delete(blobFile);
-            Check(!real.EmbeddedIsNewer, "The same release is not newer than the installed one");
-            Check(real.ExtractEmbedded() && File.Exists(blobFile), "A file missing from an up-to-date install must be restored");
-            Check(File.ReadAllText(stun) == "newer", "Files that are already there must not be overwritten");
-            Check(!real.ExtractEmbedded(), "Nothing is restored when nothing is missing");
+            Check(real.ExtractEmbedded() && real.Installed, "The embedded zapret2 must unpack");
+            Console.WriteLine("Embedded zapret2: " + Zapret.EmbeddedVersion);
+            test(real);
         }
         finally
         {
             embedded.SetValue(null, "");
         }
     }
+
+    /// <summary>Only parses options; does not load WinDivert or alter network traffic.</summary>
+    static TestProcessResult DryRun(Zapret zapret, string config)
+    {
+        File.WriteAllText(Path.Combine(zapret.Dir, "zarp.cfg"), config, new System.Text.UTF8Encoding(false));
+        File.WriteAllText(Path.Combine(_artifacts, "zarp.cfg"), config, new System.Text.UTF8Encoding(false));
+        var psi = new System.Diagnostics.ProcessStartInfo(zapret.Exe, "@zarp.cfg --dry-run") { WorkingDirectory = zapret.Dir };
+        psi.EnvironmentVariables["__COMPAT_LAYER"] = "RunAsInvoker";
+        var run = RunTestProcess(psi, 30000);
+        string hashes;
+        using (var sha = System.Security.Cryptography.SHA256.Create())
+            hashes = string.Join("\n", new[] { "winws2.exe", "cygwin1.dll" }.Select(name =>
+            {
+                try
+                {
+                    using (var stream = File.OpenRead(Path.Combine(zapret.Dir, name)))
+                        return name + " SHA-256: " + BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", "");
+                }
+                catch (IOException e) { return name + " SHA-256 unavailable: " + e.Message; }
+                catch (UnauthorizedAccessException e) { return name + " SHA-256 unavailable: " + e.Message; }
+            }));
+        string diagnostics = "zapret2: " + Zapret.EmbeddedVersion + "\n" + hashes + "\n" + run.Describe() + "\nConfiguration:\n" + config;
+        File.WriteAllText(Path.Combine(_artifacts, "winws2.txt"), diagnostics, new System.Text.UTF8Encoding(false));
+        Console.WriteLine(diagnostics);
+        return run;
+    }
+
+    static void TestStrategyDryRun(Strategy strategy, bool restrict) => WithEmbeddedZapret(zapret =>
+    {
+        var run = DryRun(zapret, zapret.BuildConfig(strategy, restrict));
+        Check(run.StartError == null && !run.TimedOut && run.OutputComplete && run.Code == 0 && run.Stdout.Contains("command line parameters verified"),
+            $"{strategy.Id}, restrict={restrict}: winws2 did not verify the configuration.\n" + File.ReadAllText(Path.Combine(_artifacts, "winws2.txt")));
+    });
+
+    static void TestUnknownWinwsOption() => WithEmbeddedZapret(zapret =>
+    {
+        var run = DryRun(zapret, "--no-such-option=1\n");
+        Check(run.StartError == null && !run.TimedOut && run.OutputComplete && run.Code != 0 &&
+            (run.Stdout + run.Stderr).Contains("no-such-option"), "winws2 must reject the unknown option explicitly, not just crash.\n" + run.Describe());
+    });
+
+    static void TestMissingStrategyBlob() => WithEmbeddedZapret(zapret =>
+    {
+        var strategy = StrategyCatalog.BuiltInStrategies.Single(s => s.Id == "warp-t-fake-multi");
+        string blob = Path.Combine(zapret.Dir, "files", "fake", "tls_clienthello_gosuslugi_ru.bin");
+        Check(File.Exists(blob), "The embedded zapret2 must carry the gosuslugi blob");
+        File.Move(blob, blob + ".hidden");
+        try
+        {
+            var run = DryRun(zapret, zapret.BuildConfig(strategy, true));
+            Check(run.StartError == null && !run.TimedOut && run.OutputComplete && run.Code != 0 &&
+                (run.Stdout + run.Stderr).Contains("tls_clienthello_gosuslugi_ru.bin"), "A missing blob must be rejected explicitly.\n" + run.Describe());
+        }
+        finally { File.Move(blob + ".hidden", blob); }
+    });
+
+    static void TestStrategyLuaSymbols() => WithEmbeddedZapret(zapret =>
+    {
+        // --dry-run does not check Lua function/argument names.
+        string lua = File.ReadAllText(Path.Combine(zapret.Dir, "lua", "zapret-lib.lua")) + "\n" + File.ReadAllText(Path.Combine(zapret.Dir, "lua", "zapret-antidpi.lua"));
+        foreach (var strategy in StrategyCatalog.BuiltInStrategies.Where(s => s.UsesZapret))
+        foreach (Match call in Regex.Matches(strategy.Args, @"--lua-desync=([A-Za-z0-9_]+)((?::[^\s:=]+(?:=[^\s:]*)?)*)"))
+        {
+            string function = call.Groups[1].Value;
+            Check(Regex.IsMatch(lua, @"\bfunction\s+" + function + @"\s*\("), strategy.Id + ": zapret2 " + Zapret.EmbeddedVersion + " has no desync function " + function);
+            foreach (var arg in call.Groups[2].Value.Split(new[] { ':' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string name = arg.Split('=')[0];
+                Check(Regex.IsMatch(lua, @"\b" + Regex.Escape(name) + @"\b"), strategy.Id + ": " + function + " has no argument " + name + " in zapret2 " + Zapret.EmbeddedVersion);
+            }
+        }
+    });
+
+    static void TestRestoreEmbeddedFiles() => WithEmbeddedZapret(zapret =>
+    {
+        string blob = Path.Combine(zapret.Dir, "files", "fake", "tls_clienthello_gosuslugi_ru.bin");
+        string stun = Path.Combine(zapret.Dir, "files", "fake", "stun.bin");
+        File.WriteAllText(stun, "newer");
+        File.Delete(blob);
+        Check(!zapret.EmbeddedIsNewer, "The same release is not newer than the installed one");
+        Check(zapret.ExtractEmbedded() && File.Exists(blob), "A file missing from an up-to-date install must be restored");
+        Check(File.ReadAllText(stun) == "newer", "Files that are already there must not be overwritten");
+        Check(!zapret.ExtractEmbedded(), "Nothing is restored when nothing is missing");
+    });
 
     /// <summary>Из подтверждённых стратегий берётся самая быстрая: меньше подключение и пинг - лучше.</summary>
     static void TestSearchRules()
@@ -1288,7 +1255,7 @@ static partial class Program
         using (var bitmap = new Bitmap(form.Width, form.Height))
         {
             form.DrawToBitmap(bitmap, new Rectangle(Point.Empty, bitmap.Size));
-            bitmap.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, name));
+            bitmap.Save(Path.Combine(_artifacts, name));
         }
     }
 
