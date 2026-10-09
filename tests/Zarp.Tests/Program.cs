@@ -893,7 +893,8 @@ static partial class Program
         File.WriteAllText(Path.Combine(_artifacts, "zarp.cfg"), config, new System.Text.UTF8Encoding(false));
         var psi = new System.Diagnostics.ProcessStartInfo(zapret.Exe, "@zarp.cfg --dry-run") { WorkingDirectory = zapret.Dir };
         psi.EnvironmentVariables["__COMPAT_LAYER"] = "RunAsInvoker";
-        var run = RunTestProcess(psi, 30000);
+        var lost = new List<TestProcessResult>();
+        var run = RunUntilLoaded(() => RunTestProcess(psi, 30000), lost);
         string hashes;
         using (var sha = System.Security.Cryptography.SHA256.Create())
             hashes = string.Join("\n", new[] { "winws2.exe", "cygwin1.dll" }.Select(name =>
@@ -906,10 +907,62 @@ static partial class Program
                 catch (IOException e) { return name + " SHA-256 unavailable: " + e.Message; }
                 catch (UnauthorizedAccessException e) { return name + " SHA-256 unavailable: " + e.Message; }
             }));
-        string diagnostics = "zapret2: " + Zapret.EmbeddedVersion + "\n" + hashes + "\n" + run.Describe() + "\nConfiguration:\n" + config;
+        string launches = lost.Count == 0 ? run.Describe() :
+            LaunchRetryMarker + " the Windows loader killed winws2 (0xC0000142, no output) " + lost.Count + " time(s) before the last launch.\n" +
+            string.Join("\n", lost.Concat(new[] { run }).Select((r, i) => "Launch " + (i + 1) + " of " + (lost.Count + 1) + ":\n" + r.Describe()));
+        string diagnostics = "zapret2: " + Zapret.EmbeddedVersion + "\n" + hashes + "\n" + launches + "\nConfiguration:\n" + config;
         File.WriteAllText(Path.Combine(_artifacts, "winws2.txt"), diagnostics, new System.Text.UTF8Encoding(false));
         Console.WriteLine(diagnostics);
         return run;
+    }
+
+    /// <summary>A process that died in the Windows loader says nothing about its arguments and is started again; every other result is final.</summary>
+    static void TestLoaderRetry()
+    {
+        const int Loader = -1073741502; // exit code of the CI failures, 0xC0000142
+        TestProcessResult Result(int code, string stdout = "", string stderr = "") =>
+            new TestProcessResult { Code = code, Stdout = stdout, Stderr = stderr, OutputComplete = true };
+        int launches = 0, lostCount = 0;
+        TestProcessResult Launch(params TestProcessResult[] script)
+        {
+            launches = 0;
+            var lost = new List<TestProcessResult>();
+            var run = RunUntilLoaded(() => script[Math.Min(launches++, script.Length - 1)], lost, 0);
+            lostCount = lost.Count;
+            return run;
+        }
+
+        var loader = Result(Loader);
+        var verified = Result(0, "command line parameters verified\n");
+        var outcome = Launch(loader, loader, verified);
+        Check(outcome == verified && launches == 3 && lostCount == 2, "A process killed by the loader must be started again until it runs");
+        outcome = Launch(loader);
+        Check(outcome == loader && launches == LaunchAttempts && lostCount == LaunchAttempts - 1,
+            "A process that keeps dying in the loader must give up after " + LaunchAttempts + " launches and fail with its last result");
+
+        var final = new Dictionary<string, TestProcessResult>
+        {
+            ["success"] = verified,
+            ["the program ran and refused its arguments"] = Result(1, "", "unknown option --no-such-option\n"),
+            ["the program printed before it died"] = Result(Loader, "", "something\n"),
+            ["a missing DLL is a broken package, not a flake"] = Result(unchecked((int)0xC0000135)),
+            ["a crash inside the program"] = Result(unchecked((int)0xC0000005)),
+            ["a timeout"] = new TestProcessResult { Code = Loader, OutputComplete = true, TimedOut = true },
+            ["a launch error"] = new TestProcessResult { Code = Loader, OutputComplete = true, StartError = "cannot start" },
+            ["output that did not finish"] = new TestProcessResult { Code = Loader, OutputComplete = false }
+        };
+        foreach (var pair in final)
+        {
+            outcome = Launch(pair.Value, verified);
+            Check(outcome == pair.Value && launches == 1 && lostCount == 0, "Must not be started again: " + pair.Key);
+        }
+
+        // A real process: its exit status must arrive as the same number the loader reports.
+        var died = new List<TestProcessResult>();
+        int real = 0;
+        var cmd = RunUntilLoaded(() => RunTestProcess(new System.Diagnostics.ProcessStartInfo(ProcessUtil.SystemExe("cmd.exe"),
+            "/d /c exit " + (real++ < 2 ? Loader : 0)), 30000), died, 0);
+        Check(cmd.Code == 0 && real == 3 && died.Count == 2, "A real process that exits with the loader status must be started again.\n" + cmd.Describe());
     }
 
     static void TestStrategyDryRun(Strategy strategy, bool restrict) => WithEmbeddedZapret(zapret =>

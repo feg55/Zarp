@@ -26,6 +26,8 @@ With the command above, reports are in `build/test-results`:
 
 Reports are updated after every completed case. Default case timeout is 120 seconds; winws2 option parsing has a 30-second timeout. No failing case is automatically retried or turned into a pass.
 
+The one exception is a winws2 launch that the Windows loader kills: exit code `0xC0000142` (`STATUS_DLL_INIT_FAILED`) with no output and no timeout. The program never read its arguments, and on GitHub runners this now and then happens to any strategy case whatever its configuration. Such a launch is repeated, up to 4 launches in total (`TestLoaderRetry` covers the rules). The case still fails if the last launch dies the same way. Every launch is kept in `winws2.txt`, and a case that passed after a repeat adds a `::warning` annotation to the run, so the repeats stay visible. Any other exit code, any output, a timeout or a start error is final.
+
 ## Running selected cases
 
 ```powershell

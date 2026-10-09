@@ -52,6 +52,7 @@ static partial class Program
         Add(nameof(TestVpnDetection), TestVpnDetection);
         Add(nameof(TestBuiltInStrategies), TestBuiltInStrategies);
         Add(nameof(TestPackedStrategyFiles), TestPackedStrategyFiles);
+        Add(nameof(TestLoaderRetry), TestLoaderRetry);
         Add(nameof(TestUnknownWinwsOption), TestUnknownWinwsOption);
         foreach (bool restrict in new[] { true, false })
         foreach (var strategy in StrategyCatalog.BuiltInStrategies.Where(s => s.UsesZapret))
@@ -212,6 +213,13 @@ static partial class Program
             catch (Exception e) { result.Status = "FAIL"; result.Details = e.ToString(); }
             results.Add(result);
             Console.WriteLine($"[{result.Status}] {test.Name} ({result.Seconds:F2}s, {result.Checks} checks)");
+            if (result.Status == "PASS" && result.Stdout.Contains(LaunchRetryMarker))
+            {
+                const string note = "winws2 was killed by the Windows loader (0xC0000142) and started again; the case passed on a later launch. See winws2.txt in the case directory.";
+                Console.WriteLine(annotations && Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true"
+                    ? "::warning title=" + Annotation(test.Name, true) + "::" + note
+                    : "Note: " + note);
+            }
             if (result.Status != "PASS")
             {
                 Console.WriteLine(result.Details);
@@ -365,6 +373,35 @@ static partial class Program
         }
         result.ElapsedMs = clock.ElapsedMilliseconds;
         return result;
+    }
+
+    const int LaunchAttempts = 4;
+    // Written by DryRun when winws2 had to be started again; RunSuite turns it into a warning for a passing case.
+    const string LaunchRetryMarker = "Launch retried:";
+
+    /// <summary>
+    /// STATUS_DLL_INIT_FAILED with no output and no timeout: the Windows loader killed the process before any of its code ran,
+    /// so the result says nothing about what it was asked to do. A freshly extracted Cygwin binary now and then dies like this
+    /// on a busy CI runner, whatever its arguments are.
+    /// </summary>
+    static bool DiedInLoader(TestProcessResult run) =>
+        run.StartError == null && !run.TimedOut && run.OutputComplete && run.Code == unchecked((int)0xC0000142) &&
+        run.Stdout.Length == 0 && run.Stderr.Length == 0;
+
+    /// <summary>
+    /// Starts the process again only when it died in the loader; any other result, good or bad, is final. The launches that died
+    /// are added to lost so that the diagnostics keep them. After LaunchAttempts launches the last result is returned as it is.
+    /// </summary>
+    static TestProcessResult RunUntilLoaded(Func<TestProcessResult> launch, List<TestProcessResult> lost, int delayMs = 500)
+    {
+        var run = launch();
+        while (DiedInLoader(run) && lost.Count < LaunchAttempts - 1)
+        {
+            lost.Add(run);
+            Thread.Sleep(delayMs * lost.Count);
+            run = launch();
+        }
+        return run;
     }
 
     static List<TestCase> RunnerFixtures() => new List<TestCase>
