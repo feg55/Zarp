@@ -148,11 +148,25 @@ static partial class Program
         return main;
     }
 
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetWindowLongW")] static extern int GetWindowLong(IntPtr window, int index);
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "SetWindowLongW")] static extern int SetWindowLong(IntPtr window, int index, int value);
+
+    /// <summary>
+    /// Puts a test form offscreen and makes it a window that is never activated. An activated form takes over the foreground and the keyboard:
+    /// whatever a person types in another window while a case runs vanishes into it (and shows up as a stray character in a text box, which
+    /// fails the case). WinForms rewrites the extended style between creating the window and raising Load, so the style is set at both
+    /// moments: when the native window is created (also after a recreated handle) and in Load, which comes right before the window is shown.
+    /// </summary>
     static void PositionOffscreen(Form form)
     {
         form.ShowInTaskbar = false;
         form.StartPosition = FormStartPosition.Manual;
         form.Location = new Point(-20000, -20000);
+        const int GWL_EXSTYLE = -20, WS_EX_NOACTIVATE = 0x08000000;
+        void NeverActivate() => SetWindowLong(form.Handle, GWL_EXSTYLE, GetWindowLong(form.Handle, GWL_EXSTYLE) | WS_EX_NOACTIVATE);
+        form.HandleCreated += (s, e) => NeverActivate();
+        form.Load += (s, e) => NeverActivate();
+        if (form.IsHandleCreated) NeverActivate();
     }
 
     static void TestClose(bool cancel, bool remember, bool tray)

@@ -96,7 +96,9 @@ static partial class Program
             var error = GetPrivate<Label>(form, "_error");
             var save = GetPrivate<Button>(form, "_save");
             var reset = GetPrivate<Button>(form, "_reset");
-            Check(name.Parent == form && name.Text == "Work" && !reset.Visible && direct.Text == "domain:corp.example" && block.Text.Contains("category-ads-all"), "A custom preset shows its name and rules and has no reset");
+            Check(name.Parent == form && name.Text == "Work" && !reset.Visible && direct.Text == "domain:corp.example" && block.Text.Contains("category-ads-all"),
+                "A custom preset shows its name and rules and has no reset: name on the form=" + (name.Parent == form) + ", name='" + name.Text + "', reset visible=" + reset.Visible +
+                ", direct='" + direct.Text + "', block='" + block.Text + "'");
             Check((int)name.GetType().GetProperty("MaxLength").GetValue(name) == 80, "A preset name is limited to 80 characters, like the stored one");
             direct.Text = "domain:corp.example\nbad rule here";
             save.PerformClick();
@@ -171,7 +173,9 @@ static partial class Program
             PumpUntil(() => engine.Geo.State("geoip", "https://mirror.example/geoip.dat").Exists && !engine.Geo.AnyDownloading, "The download");
             Application.DoEvents();
             string ready = L.T("geo.ready", 3, "@@");
-            Check(status.Text.StartsWith(ready.Substring(0, ready.IndexOf("@@"))) && download.Text == L.T("geo.update") && error.Text == "", "A downloaded database shows its category count: " + status.Text);
+            Check(status.Text.StartsWith(ready.Substring(0, ready.IndexOf("@@"))) && download.Text == L.T("geo.update") && error.Text == "",
+                "A downloaded database shows its category count: status='" + status.Text + "', button='" + download.Text + "', error='" + error.Text + "', address='" + url.Text +
+                "', saved='" + engine.Config.Routing.GeoipUrl + "', downloading=" + engine.Geo.AnyDownloading);
             http.Respond = r => Ok(Array.ConvertAll(new byte[40], b => (byte)'x'));
             download.PerformClick();
             PumpUntil(() => !engine.Geo.AnyDownloading && engine.Geo.State("geoip", "https://mirror.example/geoip.dat").Error != null, "The failed update");

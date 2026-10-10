@@ -140,8 +140,9 @@ namespace Zarp.Core
                 }
                 Update(key, s => { s.Downloading = false; s.Error = null; });
             }
-            catch (OperationCanceledException)
+            catch (Exception e) when (e is OperationCanceledException || ct.IsCancellationRequested)
             {
+                // отмена, поймавшая загрузку между ответом и началом чтения, обрывается ошибкой закрытого ответа: это тоже отмена, а не сбой
                 Update(key, s => { s.Downloading = false; s.Error = L.T("geo.cancelled"); });
             }
             catch (Exception)

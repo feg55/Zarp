@@ -413,7 +413,9 @@ static partial class Program
             Check(running.Wait(10000), "Cancelling interrupts a stalled download");
         }
         state = geo.State("geoip", A);
-        Check(state.Error == L.T("geo.cancelled") && state.Exists && !state.Downloading && state.Categories == 3, "A cancelled update keeps the previous database");
+        Check(state.Error == L.T("geo.cancelled") && state.Exists && !state.Downloading && state.Categories == 3,
+            "A cancelled update keeps the previous database and says it was cancelled, got error='" + state.Error + "', exists=" + state.Exists +
+            ", downloading=" + state.Downloading + ", categories=" + state.Categories);
     }
 
     /// <summary>Поток, который отдаёт один байт и дальше зависает, пока его не освободят (как закрытое соединение).</summary>

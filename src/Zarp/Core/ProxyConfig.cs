@@ -80,7 +80,8 @@ namespace Zarp.Core
                 inbounds.Add(Rule("type", "tun", "tag", "tun-in", "interface_name", SingBox.TunName,
                     "address", addresses, "auto_route", true, "strict_route", true, "stack", "gvisor"));
             }
-            inbounds.Add(Rule("type", "mixed", "tag", Probe, "listen", "127.0.0.1", "listen_port", s.Port,
+            // только SOCKS5 с паролем: вход HTTP-прокси при ошибке входа закрывает соединение сбросом (см. ProbeClient)
+            inbounds.Add(Rule("type", "socks", "tag", Probe, "listen", "127.0.0.1", "listen_port", s.Port,
                 "users", new List<object> { Rule("username", s.User, "password", s.Password) }));
 
             var rules = new List<object>();

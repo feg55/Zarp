@@ -13,7 +13,8 @@ The cases for your own server (`TestProxy*`, `TestSingBox*`, `TestRouting*`, `Te
 
 - `TestSingBoxConfigsAccepted` feeds every kind of generated configuration to `sing-box check`, which also rejects invalid RE2 expressions and CIDR ranges.
 - `TestSingBoxLoopback[...]` starts a real VLESS, Trojan or Hysteria2 server (with the WebSocket, gRPC and HTTPUpgrade transports where they apply), connects the Zarp client to it and passes TCP and UDP traffic.
-- `TestProxyMeasure` runs the connection check of Zarp through a real sing-box probe port: its login and password, plain HTTP and `CONNECT`, and the `ip=` field that a genuine `cdn-cgi/trace` answer has. The check page is replaced by a page on localhost.
+- `TestProxyMeasure` runs the connection check of Zarp through a real sing-box probe port: the SOCKS5 login and password, the refusals for a wrong or missing password, the `ip=` field that a genuine `cdn-cgi/trace` answer has, and the start of TLS inside the tunnel. The check page is replaced by a page on localhost.
+- `TestProbeClient` feeds the same check, request by request, from a fake SOCKS5 server on localhost: answers with and without length, chunked answers, answers that never end, stubs without `ip=`, error codes, a wrong password, a reset during the handshake, a server that stays silent, cancelling and a server that answers TLS in plain text.
 - `TestSingBoxTamper` changes the extracted `sing-box.exe` by one byte and checks that Zarp refuses to start it and that unpacking restores the genuine file.
 - `TestRoutingEndToEnd` starts a Trojan server that redirects everything it receives to a marker, so the answer shows whether a connection went through the server or directly. It checks the priority of Block, Proxy and Direct, every kind of rule, GeoIP and GeoSite databases, and the per-app selection by process path (ignoring case).
 - The engine flows for a server (`TestProxyMode*`) replace sing-box with a fake, so they need no process at all.
@@ -33,6 +34,8 @@ With the command above, reports are in `build/test-results`:
 - Dated run directories: environment, per-case results, stdout, stderr and process diagnostics.
 - Strategy cases: `zarp.cfg` and `winws2.txt`, including the command, exit code in decimal and hex, timeout flag, stdout/stderr (explicitly marked when empty), embedded zapret2 version and binary SHA-256 hashes.
 - UI image cases: PNG captures next to their case results.
+- Windows in the cases are shown offscreen and never activated (`WS_EX_NOACTIVATE`, set in `PositionOffscreen`). An activated test window takes over the foreground, so keys typed in another window while the suite runs would vanish into it and show up as a stray character in a text box.
+- Test data: every case works in its own `test-data\<id>` folder next to `Zarp.Tests.exe` (the path is printed after `Test data:` in the case output) with its own unpacked copies of zapret2 and sing-box, tens of megabytes each. A passing or skipped case deletes its folder, a failed case keeps it for inspection, and the next run removes the folders that are older than a day.
 
 Reports are updated after every completed case. Writing a report is retried a few times if a virus scanner holds the file for a moment. Default case timeout is 120 seconds; winws2 option parsing has a 30-second timeout. No failing case is automatically retried or turned into a pass.
 

@@ -86,6 +86,7 @@ static partial class Program
         Add(nameof(TestCountryFilterControl), TestCountryFilterControl);
         Add(nameof(TestSingBoxLaunchRetry), TestSingBoxLaunchRetry);
         Add(nameof(TestSingBoxConfigsAccepted), TestSingBoxConfigsAccepted);
+        Add(nameof(TestProbeClient), TestProbeClient);
         Add(nameof(TestProxyMeasure), TestProxyMeasure);
         Add(nameof(TestSingBoxTamper), TestSingBoxTamper);
         tests.Add(new TestCase { Name = nameof(TestRoutingEndToEnd), Body = TestRoutingEndToEnd, TimeoutMs = 240000 });
@@ -190,11 +191,45 @@ static partial class Program
         new XElement("result", new XAttribute("name", test.Name), new XAttribute("status", status),
             new XAttribute("checks", _passed), new XAttribute("file", file), new XAttribute("line", line),
             new XElement("details", XmlText(details))).Save(Path.Combine(_artifacts, "result.xml"));
+        // Every case unpacks its own copy of the embedded programs (sing-box alone is 45 MB, some cases have two copies), so a green
+        // case removes its data folder. A failed case keeps it for inspection: the path is printed at the start of the output.
+        if (status != "FAIL" && _data != null) DeleteFolder(_data);
         return status == "FAIL" ? 1 : 0;
+    }
+
+    /// <summary>
+    /// Best effort: a program that was stopped a moment ago may still hold its exe for a few milliseconds (more on a busy machine, or
+    /// while a virus scanner looks at it), so a refused delete is retried a few times.
+    /// </summary>
+    static void DeleteFolder(string path)
+    {
+        for (int attempt = 0; attempt < 8; attempt++)
+        {
+            try { Directory.Delete(path, true); return; }
+            catch (DirectoryNotFoundException) { return; }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            Thread.Sleep(250);
+        }
+    }
+
+    /// <summary>The data folders of failed cases stay for inspection; after a day nobody looks at them, and they are large.</summary>
+    static void RemoveOldTestData()
+    {
+        try
+        {
+            string root = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "test-data");
+            if (!Directory.Exists(root)) return;
+            foreach (var folder in Directory.GetDirectories(root))
+                if (DateTime.UtcNow - Directory.GetCreationTimeUtc(folder) > TimeSpan.FromDays(1))
+                    try { Directory.Delete(folder, true); } catch { }
+        }
+        catch { }
     }
 
     static List<CaseResult> RunSuite(List<TestCase> tests, string directory, bool fixtures, bool annotations)
     {
+        RemoveOldTestData();
         Directory.CreateDirectory(directory);
         string run = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture) + "-" + Guid.NewGuid().ToString("N").Substring(0, 8);
         string runDirectory = Path.Combine(directory, run);

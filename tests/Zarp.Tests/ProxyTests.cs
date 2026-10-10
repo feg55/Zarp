@@ -114,7 +114,7 @@ static partial class Program
         var cfg = JsonObject(ProxyConfig.Build(TestSession(profile, false)));
         var inbounds = Arr(cfg["inbounds"]);
         var probe = Obj(inbounds.Single());
-        Check((string)probe["type"] == "mixed" && (string)probe["listen"] == "127.0.0.1" && (int)probe["listen_port"] == 18080, "The probe listens on loopback only");
+        Check((string)probe["type"] == "socks" && (string)probe["listen"] == "127.0.0.1" && (int)probe["listen_port"] == 18080, "The probe speaks SOCKS5 and listens on loopback only");
         Check((string)Obj(Arr(probe["users"]).Single())["username"] == "zarp" && (string)Obj(Arr(probe["users"]).Single())["password"] == "pw", "The probe is protected by credentials");
         var outbound = Obj(Arr(cfg["outbounds"])[0]);
         Check((string)outbound["tag"] == "proxy" && (string)outbound["server"] == "203.0.113.5" && (string)Obj(outbound["tls"])["server_name"] == "proxy.example", "The server is dialled by its resolved address");
@@ -440,7 +440,10 @@ static partial class Program
         }
     }
 
-    /// <summary>Один запрос GET через HTTP-прокси вручную, без .NET: так видно, что отвечает сам sing-box. Возвращает первую строку ответа.</summary>
+    /// <summary>
+    /// Один запрос GET, отправленный вручную как HTTP-прокси, без .NET. Возвращает первую строку ответа, "closed", если
+    /// соединение закрыто без ответа, или "reset", если оно сброшено: sing-box так закрывает соединение после ошибки входа.
+    /// </summary>
     static string RawProxyGet(int proxyPort, string user, string password, string url)
     {
         using (var tcp = new TcpClient())
@@ -451,11 +454,36 @@ static partial class Program
             string auth = user == null ? "" : "Proxy-Authorization: Basic " + Convert.ToBase64String(Encoding.ASCII.GetBytes(user + ":" + password)) + "\r\n";
             var uri = new Uri(url);
             var request = Encoding.ASCII.GetBytes("GET " + url + "?x=1 HTTP/1.1\r\nHost: " + uri.Authority + "\r\n" + auth + "Connection: close\r\n\r\n");
-            stream.Write(request, 0, request.Length);
-            var head = new StringBuilder();
-            int b;
-            while ((b = stream.ReadByte()) >= 0 && b != '\n') head.Append((char)b);
-            return head.ToString().TrimEnd('\r');
+            try
+            {
+                stream.Write(request, 0, request.Length);
+                var head = new StringBuilder();
+                int b;
+                while ((b = stream.ReadByte()) >= 0 && b != '\n') head.Append((char)b);
+                return head.Length == 0 ? "closed" : head.ToString().TrimEnd('\r');
+            }
+            catch (IOException) { return "reset"; }
+        }
+    }
+
+    /// <summary>Клиент SOCKS5 предлагает только вход без пароля. IOException - вход отказал (ответ 05 FF) или оборвал соединение.</summary>
+    static void SocksWithoutPassword(int port)
+    {
+        using (var tcp = new TcpClient())
+        {
+            tcp.Connect(IPAddress.Loopback, port);
+            tcp.ReceiveTimeout = tcp.SendTimeout = 10000;
+            var stream = tcp.GetStream();
+            stream.Write(new byte[] { 5, 1, 0 }, 0, 3);
+            var reply = new byte[2];
+            for (int done = 0; done < 2;)
+            {
+                int n = stream.Read(reply, done, 2 - done);
+                if (n <= 0) throw new IOException("connection closed");
+                done += n;
+            }
+            if (reply[0] == 5 && reply[1] == 0) return; // вход согласился обойтись без пароля
+            throw new IOException("refused, method " + reply[1]);
         }
     }
 
@@ -631,10 +659,9 @@ static partial class Program
     });
 
     /// <summary>
-    /// Проверка соединения (ProxyRuntime.MeasureAsync) настоящим клиентом .NET через проверочный вход настоящего sing-box:
-    /// логин и пароль входа, обычный HTTP и CONNECT, разбор ответа cdn-cgi/trace. Страница проверки подменена страницей на
-    /// localhost, интернет не нужен. До неё идут по имени, которое разрешает сервер: .NET Framework никогда не отправляет через
-    /// прокси адреса localhost и 127.0.0.1, и проверка по ним не прошла бы через sing-box.
+    /// Проверка соединения (ProxyRuntime.MeasureAsync) через проверочный вход настоящего sing-box (SOCKS5 с паролем): запросы
+    /// идут через сервер до страницы на localhost, интернет не нужен. До страницы идут по имени, которое разрешает сервер, как
+    /// в программе; сам разбор ответов проверяет TestProbeClient.
     /// </summary>
     static void TestProxyMeasure() => WithEmbeddedSingBox(box =>
     {
@@ -654,9 +681,9 @@ static partial class Program
                 SetPrivate(runtime, "TraceUrl", Named(web.Url("/trace")));
                 var good = Sync(() => runtime.MeasureAsync(session, 2, 10000, CancellationToken.None));
                 // на localhost целый запрос может занять меньше миллисекунды, поэтому задержка допускает 0
-                Check(good.Ok && good.FirstMs >= 1 && good.PingMs >= 0 && web.Requests == 3,
+                Check(good.Ok && good.FirstMs >= 1 && good.PingMs >= 0 && good.Failed == 0 && web.Requests == 3,
                     "One warm-up and two samples must reach the page through the server: ok=" + good.Ok + ", first=" + good.FirstMs + ", ping=" + good.PingMs +
-                    ", requests=" + web.Requests + ", error=" + good.Error);
+                    ", requests=" + web.Requests + ", failed=" + good.Failed + ", last error=" + good.Error);
 
                 SetPrivate(runtime, "TraceUrl", Named(web.Url("/portal")));
                 var portal = Sync(() => runtime.MeasureAsync(session, 1, 10000, CancellationToken.None));
@@ -666,17 +693,17 @@ static partial class Program
                 var missing = Sync(() => runtime.MeasureAsync(session, 1, 10000, CancellationToken.None));
                 Check(!missing.Ok && !string.IsNullOrEmpty(missing.Error), "An error answer is a failed check");
 
-                // проверочный вход закрыт для тех, кто не знает случайный пароль: и по HTTP, и по SOCKS5, до страницы запрос не доходит
+                // проверочный вход закрыт для тех, кто не знает случайный пароль; HTTP-прокси на нём нет. До страницы запрос не доходит
                 int before = web.Requests;
-                string target = Named(web.Url("/trace"));
-                string good407 = RawProxyGet(session.Port, null, null, target), wrong407 = RawProxyGet(session.Port, session.User, "wrong", target);
-                Check(good407.StartsWith("HTTP/1.1 407") && wrong407.StartsWith("HTTP/1.1 407") && web.Requests == before,
-                    "The probe port must refuse a missing or wrong password over HTTP, got '" + good407 + "' and '" + wrong407 + "', page requests " + before + " -> " + web.Requests);
-                Check(RawProxyGet(session.Port, session.User, session.Password, target).StartsWith("HTTP/1.1 200") && web.Requests == before + 1,
-                    "The right password opens the probe port over HTTP");
+                var wrong = new ProxySession { Profile = session.Profile, Port = session.Port, User = session.User, Password = "wrong" };
+                var refused = Sync(() => runtime.MeasureAsync(wrong, 1, 5000, CancellationToken.None));
+                Check(!refused.Ok && refused.Failed == 2, "A wrong password fails every request of the check, got ok=" + refused.Ok + ", failed=" + refused.Failed + ", " + refused.Error);
                 Check(Catch(() => new Socks5Session(session.Port, session.User, "wrong")) is IOException, "The probe port must refuse a wrong password over SOCKS5");
+                Check(Catch(() => SocksWithoutPassword(session.Port)) is IOException, "The probe port must refuse a client that offers no password");
+                string viaHttp = RawProxyGet(session.Port, session.User, session.Password, Named(web.Url("/trace")));
+                Check(!viaHttp.StartsWith("HTTP/") && web.Requests == before, "The probe port does not speak HTTP proxy, got '" + viaHttp + "'; page requests " + before + " -> " + web.Requests);
 
-                // https: сначала CONNECT с логином и паролем, поэтому до цели доходит начало рукопожатия TLS
+                // https: после рукопожатия SOCKS5 клиент начинает TLS, поэтому до цели доходит начало рукопожатия
                 var trap = new TcpListener(IPAddress.Loopback, 0);
                 trap.Start();
                 try
@@ -696,7 +723,7 @@ static partial class Program
                     var tls = Sync(() => runtime.MeasureAsync(session, 0, 2500, CancellationToken.None));
                     Check(!tls.Ok, "A target that does not speak TLS is a failed check");
                     Check(accepted.Wait(10000) && got == 3 && hello[0] == 0x16 && hello[1] == 0x03,
-                        "https must go through CONNECT with the credentials, so the target receives a TLS ClientHello");
+                        "https must go through the SOCKS5 login, so the target receives a TLS ClientHello");
                 }
                 finally { trap.Stop(); }
 

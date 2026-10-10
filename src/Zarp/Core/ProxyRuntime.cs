@@ -19,26 +19,10 @@ namespace Zarp.Core
         public bool Ok;
         public int FirstMs;
         public int PingMs;
+        /// <summary>Причина последней неудачи. Заполнена и при успехе, если какой-то из запросов не прошёл.</summary>
         public string Error;
-    }
-
-    /// <summary>
-    /// Прокси проверки: всё идёт через проверочный вход, без исключений. Стандартный WebProxy в .NET Framework
-    /// никогда не проксирует адреса на localhost, а проверка должна проходить через sing-box в любом случае.
-    /// </summary>
-    sealed class ProbeProxy : IWebProxy
-    {
-        readonly Uri _address;
-
-        public ProbeProxy(Uri address, ICredentials credentials)
-        {
-            _address = address;
-            Credentials = credentials;
-        }
-
-        public ICredentials Credentials { get; set; }
-        public Uri GetProxy(Uri destination) => _address;
-        public bool IsBypassed(Uri host) => false;
+        /// <summary>Сколько запросов не прошло.</summary>
+        public int Failed;
     }
 
     /// <summary>
@@ -188,57 +172,43 @@ namespace Zarp.Core
         }
 
         /// <summary>
-        /// Проверка через проверочный вход sing-box: samples+1 запросов к cdn-cgi/trace, каждый на новом соединении.
-        /// Первый - прогрев, но его время считается временем подключения. Ответ должен быть настоящим трассировочным
-        /// (с полем ip): страница провайдера с кодом 200 не годится.
+        /// Проверка через проверочный вход sing-box: samples+1 запросов к cdn-cgi/trace, каждый на новом соединении
+        /// (SOCKS5 с паролем, см. ProbeClient). Первый - прогрев, но его время считается временем подключения.
+        /// Ответ должен быть настоящим трассировочным (код 200 и поле ip): страница провайдера с кодом 200 не годится.
+        /// timeoutMs - срок на каждый запрос целиком.
         /// </summary>
         public virtual async Task<ProxyMeasure> MeasureAsync(ProxySession session, int samples, int timeoutMs, CancellationToken ct)
         {
             var times = new List<int>();
-            int first = 0;
+            int first = 0, failed = 0;
             string last = null;
-            var handler = new HttpClientHandler
+            for (int i = 0; i < samples + 1; i++)
             {
-                UseProxy = true,
-                Proxy = new ProbeProxy(new Uri("http://127.0.0.1:" + session.Port), new NetworkCredential(session.User, session.Password)),
-            };
-            using (var http = new HttpClient(handler) { Timeout = TimeSpan.FromMilliseconds(Math.Max(1000, timeoutMs)) })
-            {
-                http.DefaultRequestHeaders.ConnectionClose = true;
-                http.DefaultRequestHeaders.UserAgent.ParseAdd("Zarp/1.0");
-                for (int i = 0; i < samples + 1; i++)
+                ct.ThrowIfCancellationRequested();
+                var sw = Stopwatch.StartNew();
+                ProbeAnswer answer;
+                try
                 {
-                    ct.ThrowIfCancellationRequested();
-                    var sw = Stopwatch.StartNew();
-                    string body;
-                    try
-                    {
-                        using (var response = await http.GetAsync(TraceUrl + "?" + Guid.NewGuid().ToString("N"), ct).ConfigureAwait(false))
-                        {
-                            response.EnsureSuccessStatusCode();
-                            body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-                        }
-                    }
-                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-                    catch (Exception e)
-                    {
-                        last = e is TaskCanceledException ? "timeout" : (e.InnerException ?? e).Message;
-                        continue;
-                    }
-                    sw.Stop();
-                    if (!body.Split('\n').Any(line => line.StartsWith("ip=") && line.Trim().Length > 3))
-                    {
-                        last = "trace";
-                        continue;
-                    }
-                    int ms = (int)sw.ElapsedMilliseconds;
-                    if (first == 0) first = Math.Max(1, ms);
-                    if (i > 0) times.Add(ms);
+                    answer = await ProbeClient.GetAsync(session.Port, session.User, session.Password,
+                        new Uri(TraceUrl + "?" + Guid.NewGuid().ToString("N")), Math.Max(1000, timeoutMs), ct).ConfigureAwait(false);
                 }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                catch (Exception e)
+                {
+                    last = e is TimeoutException ? "timeout" : (e.InnerException ?? e).Message;
+                    failed++;
+                    continue;
+                }
+                sw.Stop();
+                if (answer.Status != 200) { last = "HTTP " + answer.Status; failed++; continue; }
+                if (!answer.HasIp) { last = "trace"; failed++; continue; }
+                int ms = (int)sw.ElapsedMilliseconds;
+                if (first == 0) first = Math.Max(1, ms);
+                if (i > 0) times.Add(ms);
             }
-            if (times.Count == 0) return new ProxyMeasure { Error = last };
+            if (times.Count == 0) return new ProxyMeasure { Error = last, Failed = failed };
             times.Sort();
-            return new ProxyMeasure { Ok = true, FirstMs = first, PingMs = times[times.Count / 2] };
+            return new ProxyMeasure { Ok = true, FirstMs = first, PingMs = times[times.Count / 2], Error = last, Failed = failed };
         }
     }
 }
