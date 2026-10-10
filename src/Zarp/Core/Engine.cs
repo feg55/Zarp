@@ -9,13 +9,20 @@ namespace Zarp.Core
 {
     public enum EngineState { Idle, Preparing, Searching, Connecting, Connected, Disconnecting, Unknown }
 
-    /// <summary>Связывает WARP и zapret2: поиск стратегии, подключение, отключение.</summary>
+    /// <summary>
+    /// Связывает WARP и zapret2: поиск стратегии, подключение, отключение.
+    /// Если в настройках включён собственный сервер, вместо WARP подключается он (через sing-box).
+    /// </summary>
     public sealed class Engine
     {
         public string DataDir { get; }
         public AppConfig Config { get; }
         public Warp Warp { get; } = new Warp();
         public Zapret Zapret { get; }
+        public SingBox SingBox { get; }
+        /// <summary>Базы GeoIP и GeoSite для правил маршрутизации.</summary>
+        public GeoData Geo { get; }
+        /// <summary>Все стратегии: встроенные и свои, либо единственный собственный сервер.</summary>
         public List<Strategy> Strategies { get; private set; }
 
         public EngineState State { get; private set; } = EngineState.Idle;
@@ -43,6 +50,13 @@ namespace Zarp.Core
         /// <summary>Сколько ждать запуска службы WARP после установки.</summary>
         internal int WarpReadyTimeoutMs = 90000;
         internal Func<int, CancellationToken, Task<int>> MeasureTraffic = Warp.MeasureAsync;
+        /// <summary>Работа с sing-box. Подменяется в тестах, чтобы они не запускали процессов и не ходили в сеть.</summary>
+        internal ProxyRuntime Proxy;
+        /// <summary>
+        /// Правила маршрутизации пользователя в виде правил sing-box. Ошибка (нет базы, неизвестная категория)
+        /// прерывает подключение: правило не пропускается молча.
+        /// </summary>
+        internal Func<AppConfig, List<object>> CompileRules;
 
         CancellationTokenSource _cts;
         volatile bool _warpReporting;
@@ -58,6 +72,10 @@ namespace Zarp.Core
         bool _backgroundStarted;
         Strategy _activeStrategy;
         CancellationTokenSource _observation;
+        /// <summary>Работающее подключение через собственный сервер (null, если его нет).</summary>
+        ProxySession _proxy;
+        /// <summary>Адрес сервера, разрешённый в начале текущей операции (имя разрешается один раз).</summary>
+        string _proxyAddress;
 
         public Engine(string dataDir)
         {
@@ -67,6 +85,10 @@ namespace Zarp.Core
             try { if (!File.Exists(cfg) && File.Exists(legacy)) File.Move(legacy, cfg); } catch { }
             Config = AppConfig.Load(cfg);
             Zapret = new Zapret(Path.Combine(dataDir, "zapret2"));
+            SingBox = new SingBox(Path.Combine(dataDir, "singbox"));
+            Proxy = new ProxyRuntime(SingBox);
+            Geo = new GeoData(Path.Combine(dataDir, "geodata"));
+            CompileRules = config => Geo.Compile(config.Routing);
             InstallWarp = (progress, ct) => WarpInstaller.InstallAsync(DataDir, progress, ct);
             ReloadStrategies();
 
@@ -76,9 +98,14 @@ namespace Zarp.Core
             if (Config.SelectedStrategyId == "h3-fake-google") Config.SelectedStrategyId = "warp-q-google6";
         }
 
+        /// <summary>Вместо WARP подключается собственный сервер.</summary>
+        public bool ProxyMode => Config.UseProxy;
+
         public void ReloadStrategies()
         {
-            Strategies = StrategyCatalog.Load(DataDir);
+            Strategies = ProxyMode
+                ? (ProxyProfile.TryParse(Config.ProxyUri, out var profile) ? new List<Strategy> { profile.ToStrategy() } : new List<Strategy>())
+                : StrategyCatalog.Load(DataDir);
             if (Selected == null && Config.SelectedStrategyId != null)
             {
                 var matches = Strategies.Where(s => s.Custom && s.LegacyId == Config.SelectedStrategyId).ToList();
@@ -88,7 +115,42 @@ namespace Zarp.Core
                 Config.Results.Remove(id);
         }
 
-        public Strategy Selected => Strategies.FirstOrDefault(s => s.Id == Config.SelectedStrategyId);
+        /// <summary>
+        /// Стратегии, подходящие под выбранные страны. Только они видны в списке и участвуют в подборе, быстром и полном
+        /// поиске, автоматическом подключении, перепроверках и выборе из сохранённых результатов.
+        /// </summary>
+        public List<Strategy> Candidates => StrategyFilter.Apply(Strategies, Config.StrategyCountry);
+
+        public Strategy Selected => Candidates.FirstOrDefault(s => s.Id == Config.SelectedStrategyId);
+
+        /// <summary>Свои эндпоинты WARP. Испорченный вручную список считается пустым (проверка в PrepareAsync).</summary>
+        List<string> EndpointList() => EndpointParser.TryParse(Config.CustomEndpoints, out var list) ? list : new List<string>();
+
+        /// <summary>
+        /// Сохранить эндпоинты WARP и собственный сервер. Если что-то изменилось, прежние проверки и выбранная стратегия
+        /// сбрасываются: они относились к другому серверу. Уже работающее подключение не трогается до переподключения.
+        /// Возвращает false, пока идёт другая операция.
+        /// </summary>
+        public bool ApplyConnection(string endpoints, bool useProxy, string proxyUri)
+        {
+            if (IsBusy) return false;
+            endpoints = (endpoints ?? "").Trim();
+            proxyUri = (proxyUri ?? "").Trim();
+            bool changed = endpoints != Config.CustomEndpoints.Trim() || useProxy != Config.UseProxy || proxyUri != Config.ProxyUri.Trim();
+            Config.CustomEndpoints = endpoints;
+            Config.UseProxy = useProxy;
+            Config.ProxyUri = proxyUri;
+            if (changed)
+            {
+                Config.Results.Clear();
+                Config.SelectedStrategyId = null;
+            }
+            ReloadStrategies();
+            Zapret.ExtraAddresses = EndpointParser.Addresses(EndpointList());
+            Config.Save();
+            Changed?.Invoke();
+            return true;
+        }
 
         public bool IsBusy => State == EngineState.Preparing || State == EngineState.Searching
                               || State == EngineState.Connecting || State == EngineState.Disconnecting;
@@ -131,6 +193,8 @@ namespace Zarp.Core
                     return;
                 }
                 MarkFailed(s);
+                // сервер у нас один: повторный подбор означал бы те же проверки с тем же исходом
+                if (s.IsProxy) return;
                 var others = ConfirmedStrategies(s);
                 if (others.Count > 0)
                 {
@@ -139,7 +203,7 @@ namespace Zarp.Core
                 }
                 Log.Write(L.T("log.verifiedFailed"));
             }
-            await SearchAndApplyAsync(Strategies, QuickStopAfter, "log.searchQuick", ct);
+            await SearchAndApplyAsync(Candidates, QuickStopAfter, "log.searchQuick", ct);
         });
 
         /// <summary>Быстрый поиск останавливается после стольких рабочих стратегий.</summary>
@@ -152,20 +216,24 @@ namespace Zarp.Core
         public Task SearchAsync(bool full) => Run(async ct =>
         {
             if (!await PrepareAsync(ct, searching: true)) return;
-            if (full) await SearchAndApplyAsync(Strategies, 0, "log.searchFull", ct);
-            else await SearchAndApplyAsync(Strategies, QuickStopAfter, "log.searchQuick", ct);
+            if (full) await SearchAndApplyAsync(Candidates, 0, "log.searchFull", ct);
+            else await SearchAndApplyAsync(Candidates, QuickStopAfter, "log.searchQuick", ct);
         });
 
-        /// <summary>Проверить только выбранные в настройках стратегии (все, без остановки).</summary>
+        /// <summary>Проверить только выбранные в настройках стратегии (все, без остановки). Исключённые фильтром пропускаются.</summary>
         public Task TestStrategiesAsync(IEnumerable<Strategy> only) => Run(async ct =>
         {
+            var allowed = new HashSet<string>(Candidates.Select(c => c.Id));
+            var list = only.Where(s => allowed.Contains(s.Id)).ToList();
+            if (list.Count == 0) return;
             if (!await PrepareAsync(ct, searching: true)) return;
-            await SearchAndApplyAsync(only.ToList(), 0, "log.searchSelected", ct);
+            await SearchAndApplyAsync(list, 0, "log.searchSelected", ct);
         });
 
         /// <summary>Применить конкретную стратегию (из настроек) и запомнить её.</summary>
         public Task UseStrategyAsync(Strategy s) => Run(async ct =>
         {
+            if (Candidates.All(c => c.Id != s.Id)) return; // исключена фильтром стран
             if (!await PrepareAsync(ct, searching: false)) return;
             if (await ApplyAsync(s, ct))
             {
@@ -189,6 +257,12 @@ namespace Zarp.Core
             {
                 if (_stopping) return;
                 Set(EngineState.Preparing, M("detail.preparing"));
+                if (ProxyMode)
+                {
+                    // WARP и zapret2 не нужны: смотрим, не работает ли уже подключение через собственный сервер
+                    await ObserveConnectionAsync(_lifetime.Token);
+                    return;
+                }
                 // распаковать вшитый zapret2 заранее; ошибки (антивирус) разберёт PrepareAsync
                 try { Zapret.ExtractEmbedded(); }
                 catch (Exception e) { Log.Write(L.T("log.notExtracted", e.Message)); }
@@ -208,7 +282,7 @@ namespace Zarp.Core
 
         public async Task MonitorAsync()
         {
-            if (_stopping || !Warp.Installed || !await _busy.WaitAsync(0)) return;
+            if (_stopping || (!ProxyMode && !Warp.Installed) || !await _busy.WaitAsync(0)) return;
             var observation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
             _observation = observation;
             try
@@ -220,8 +294,45 @@ namespace Zarp.Core
             finally { _observation = null; observation.Dispose(); _busy.Release(); }
         }
 
+        /// <summary>Состояние подключения через собственный сервер: процесс sing-box жив и сервер отвечает.</summary>
+        async Task ObserveProxyAsync(CancellationToken ct)
+        {
+            if (_proxy == null && ProxyProfile.TryParse(Config.ProxyUri, out var profile))
+                _proxy = Proxy.Adopt(profile); // sing-box мог остаться от прошлого запуска Zarp
+            if (_proxy == null && Proxy.Running)
+            {
+                // чужой для этого запуска sing-box (другой сервер, потерянные сведения): он держит адаптер и забирает трафик, а Zarp о нём не знает
+                Log.Write(L.T("log.singboxOrphan"));
+                Proxy.Stop();
+            }
+            if (_proxy == null || !Proxy.Running)
+            {
+                bool lost = _proxy != null && State == EngineState.Connected;
+                _proxy = null;
+                if (lost) Log.Write(L.T("log.singboxStopped"));
+                // фоновая проверка не должна стирать итог последней операции, как и в режиме WARP
+                if (State != EngineState.Idle)
+                    Set(lost ? EngineState.Unknown : EngineState.Idle,
+                        lost ? M("detail.singboxFailed") : Selected == null ? M("detail.noStrategy") : M("detail.disconnected"));
+                return;
+            }
+            var measure = await Proxy.MeasureAsync(_proxy, 1, ProxyTimeoutMs(), ct);
+            ct.ThrowIfCancellationRequested();
+            if (!measure.Ok)
+            {
+                Set(EngineState.Unknown, M("err.proxyNoTraffic"));
+                return;
+            }
+            Set(EngineState.Connected, DescribeSelected());
+        }
+
         async Task ObserveConnectionAsync(CancellationToken ct)
         {
+            if (ProxyMode)
+            {
+                await ObserveProxyAsync(ct);
+                return;
+            }
             var (status, reason) = await Warp.StatusAsync(ct);
             ct.ThrowIfCancellationRequested();
             if (status == "Disconnected")
@@ -308,7 +419,7 @@ namespace Zarp.Core
             try
             {
                 if (_stopping) return;
-                var s = Selected;
+                var s = _activeStrategy ?? Selected;
                 if (State == EngineState.Connected && s != null && s.UsesZapret && Zapret.Running)
                 {
                     // Туннель WARP уже установлен, zapret нужен только для рукопожатия -
@@ -375,7 +486,7 @@ namespace Zarp.Core
                 {
                     try { if (Warp.Installed) await Warp.Cli("disconnect", 1500, limit.Token).ConfigureAwait(false); }
                     catch (Exception e) { Log.Write(L.T("log.error", e.Message)); }
-                    finally { Zapret.Stop(); }
+                    finally { Zapret.Stop(); Proxy.Stop(); }
                 }
             });
             try { cleanup.Wait(1800); } catch { }
@@ -483,6 +594,21 @@ namespace Zarp.Core
         async Task<bool> PrepareAsync(CancellationToken ct, bool searching)
         {
             Set(EngineState.Preparing, M("detail.preparing"));
+            if (ProxyMode) return await PrepareProxyAsync(ct, searching);
+            if (!EndpointParser.TryParse(Config.CustomEndpoints, out var endpoints))
+            {
+                // список правят в окне настроек, где неверный адрес не сохранится, но файл настроек можно испортить вручную
+                Log.Write(L.T("log.endpointsInvalid"));
+                Set(EngineState.Idle, M("detail.endpointsInvalid"));
+                return false;
+            }
+            Zapret.ExtraAddresses = EndpointParser.Addresses(endpoints);
+            if (Proxy.Running)
+            {
+                // проверки WARP не должны идти через наш собственный туннель
+                Log.Write(L.T("log.singboxStopping"));
+                Proxy.Stop();
+            }
             if (!await EnsureWarpAsync(ct)) return false;
             if (!Zapret.Installed || Zapret.EmbeddedIsNewer)
             {
@@ -490,23 +616,7 @@ namespace Zarp.Core
             }
             foreach (var other in Zapret.ForeignDpiTools())
                 Log.Write(L.T("log.otherDpi", other));
-            var vpns = FindForeignVpns();
-            _foreignVpn = vpns.Count > 0;
-            if (_foreignVpn)
-            {
-                // трафик WARP уйдёт в чужой туннель, и zapret на него не повлияет: каждая проверка измерит этот VPN, а не сеть
-                foreach (var v in vpns)
-                    Log.Write(L.T("log.otherVpn", v));
-                Log.Write(L.T(searching ? "log.vpnNoSearch" : "log.vpnAdvice"));
-                // без окна (автозапуск, тесты) подключиться с выбранной стратегией можно, а подбирать новую через чужой VPN нельзя
-                bool go = AskContinueWithVpn?.Invoke(vpns, searching) ?? !searching;
-                if (!go)
-                {
-                    _foreignVpn = false;
-                    Set(EngineState.Idle, M("detail.vpnOff"));
-                    return false;
-                }
-            }
+            if (!AskAboutForeignVpn(searching)) return false;
             if (!await Warp.EnsureRegisteredAsync(ct))
             {
                 Set(EngineState.Idle, M("detail.registerFailed"));
@@ -514,6 +624,101 @@ namespace Zarp.Core
             }
             return true;
         }
+
+        /// <summary>
+        /// Найти сторонние VPN и, если они есть, спросить, продолжать ли. false - пользователь отказался.
+        /// Трафик WARP или собственного сервера уйдёт в чужой туннель, поэтому проверки измерят этот VPN, а не сеть.
+        /// </summary>
+        bool AskAboutForeignVpn(bool searching)
+        {
+            var vpns = FindForeignVpns();
+            _foreignVpn = vpns.Count > 0;
+            if (!_foreignVpn) return true;
+            foreach (var v in vpns)
+                Log.Write(L.T("log.otherVpn", v));
+            Log.Write(L.T(searching ? "log.vpnNoSearch" : "log.vpnAdvice"));
+            // без окна (автозапуск, тесты) подключиться с выбранной стратегией можно, а подбирать новую через чужой VPN нельзя
+            bool go = AskContinueWithVpn?.Invoke(vpns, searching) ?? !searching;
+            if (go) return true;
+            _foreignVpn = false;
+            Set(EngineState.Idle, M("detail.vpnOff"));
+            return false;
+        }
+
+        /// <summary>Подготовка к работе через собственный сервер: ссылка, программы, sing-box, сторонние VPN.</summary>
+        async Task<bool> PrepareProxyAsync(CancellationToken ct, bool searching)
+        {
+            if (!ProxyProfile.TryParse(Config.ProxyUri, out _))
+            {
+                Log.Write(L.T("log.proxyInvalid"));
+                Set(EngineState.Idle, M("detail.proxyInvalid"));
+                return false;
+            }
+            if (Config.PerAppProxy && SelectedAppPaths().Count == 0)
+            {
+                // пустой выбор нельзя молча превращать в «все программы»
+                Log.Write(L.T("apps.empty"));
+                Set(EngineState.Idle, M("apps.empty"));
+                return false;
+            }
+            _proxyAddress = null;
+            // сначала останавливаем свой туннель и WARP: проверки не должны идти ни через один из них
+            await StopAllAsync();
+            if (!await EnsureSingBoxAsync()) return false;
+            return AskAboutForeignVpn(searching);
+        }
+
+        /// <summary>Положить sing-box на место (вшитый в exe). Антивирус может его заблокировать: тогда предлагаем исключение.</summary>
+        async Task<bool> EnsureSingBoxAsync()
+        {
+            for (int attempt = 0; attempt < 2; attempt++)
+            {
+                try
+                {
+                    if (Proxy.Prepare()) return true;
+                    Log.Write(L.T("err.singboxMissing"));
+                    Set(EngineState.Idle, M("detail.singboxMissing"));
+                    return false;
+                }
+                catch (AntivirusBlockedException e) when (attempt == 0)
+                {
+                    Log.Write(e.Message);
+                    bool allow = AskAntivirusExclusion?.Invoke(SingBox.Dir) ?? false;
+                    if (!allow || !await AddDefenderExclusionAsync(SingBox.Dir))
+                    {
+                        Set(EngineState.Idle, M("detail.avBlockedSingbox"));
+                        return false;
+                    }
+                }
+                catch (Exception e)
+                {
+                    Log.Write(L.T("log.error", e.Message));
+                    Set(EngineState.Idle, M("detail.singboxMissing"));
+                    return false;
+                }
+            }
+            Set(EngineState.Idle, M("detail.avBlockedSingbox"));
+            return false;
+        }
+
+        /// <summary>Добавить папку в исключения Защитника Windows (как для zapret2).</summary>
+        static async Task<bool> AddDefenderExclusionAsync(string dir)
+        {
+            Directory.CreateDirectory(dir);
+            string cmd = $"-NoProfile -NonInteractive -Command \"Add-MpPreference -ExclusionPath '{dir.Replace("'", "''")}'\"";
+            var r = await ProcessUtil.RunAsync(ProcessUtil.PowerShellExe, cmd, 30000);
+            Log.Write(r.Ok ? L.T("log.defenderAdded", dir) : L.T("log.defenderFailed", r.Output));
+            return r.Ok;
+        }
+
+        static string OwnExecutable()
+        {
+            try { return System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName; }
+            catch { return null; }
+        }
+
+        /// <summary>Пути выбранных программ, которые ещё существуют.</summary>
+        List<string> SelectedAppPaths() => Config.ProxyApps.Where(File.Exists).ToList();
 
         async Task<bool> InstallZapretAsync(CancellationToken ct)
         {
@@ -556,13 +761,21 @@ namespace Zarp.Core
         /// </summary>
         async Task<TestResult> TestAsync(Strategy s, CancellationToken ct, bool isolate, string previousEndpoint = null)
         {
+            if (s.IsProxy) return await TestProxyAsync(s, ct);
             var res = new TestResult { StrategyId = s.Id, When = DateTime.Now };
             await Warp.DisconnectAsync(ct);
             await Warp.SetTransportAsync(s.Transport, ct);
+            var own = EndpointList();
             if (isolate)
             {
-                res.Endpoint = Warp.NextEndpoint(s.Transport, previousEndpoint);
+                res.Endpoint = Warp.NextEndpoint(s.Transport, previousEndpoint, own);
                 res.EndpointReused = Warp.EndpointWasReused;
+                if (!await Warp.SetEndpointAsync(res.Endpoint, ct)) { res.Fail(M("err.endpoint")); return res; }
+            }
+            else if (own.Count > 0)
+            {
+                // без изоляции проверки идут на первый из своих адресов
+                res.Endpoint = own[0];
                 if (!await Warp.SetEndpointAsync(res.Endpoint, ct)) { res.Fail(M("err.endpoint")); return res; }
             }
             var err = await Zapret.StartAsync(s, Config.RestrictToWarpIps, ct);
@@ -639,7 +852,8 @@ namespace Zarp.Core
             finally
             {
                 // вернуть WARP автоматический выбор эндпоинта
-                if (isolate && !await Warp.SetEndpointAsync(null)) throw new IOException(L.T("err.endpoint"));
+                if (!ProxyMode && (isolate || EndpointList().Count > 0) && !await Warp.SetEndpointAsync(null))
+                    throw new IOException(L.T("err.endpoint"));
             }
 
             if (_foreignVpn && confirmedNow == 0)
@@ -673,7 +887,7 @@ namespace Zarp.Core
 
         /// <summary>Подтверждённые стратегии, лучшие первыми.</summary>
         List<Strategy> ConfirmedStrategies(Strategy except) =>
-            Strategies
+            Candidates
                 .Where(s => s != except && Config.Results.TryGetValue(s.Id, out var r) && r.Ok && r.Confirmed)
                 .OrderBy(s => Config.Results[s.Id].Score)
                 .ToList();
@@ -710,9 +924,24 @@ namespace Zarp.Core
         {
             Set(EngineState.Connecting, M("detail.connectingTo", s));
             Log.Write(L.T("log.connectingWith", s.Name));
+            if (s.IsProxy) return await ApplyProxyAsync(s, ct);
 
             await Warp.DisconnectAsync(ct);
             await Warp.SetTransportAsync(s.Transport, ct);
+            var own = EndpointList();
+            if (own.Count > 0)
+            {
+                // подключаемся к тому из своих адресов, на котором стратегия последний раз прошла проверку
+                string pinned = Config.Results.TryGetValue(s.Id, out var known) && known.Endpoint != null && own.Contains(known.Endpoint)
+                    ? known.Endpoint : own[0];
+                if (!await Warp.SetEndpointAsync(pinned, ct))
+                {
+                    Log.Write(L.T("err.endpoint"));
+                    await StopAllAsync();
+                    Set(EngineState.Idle, M("detail.connectFailed"));
+                    return false;
+                }
+            }
             var err = await Zapret.StartAsync(s, Config.RestrictToWarpIps, ct);
             if (err != null)
             {
@@ -738,11 +967,14 @@ namespace Zarp.Core
 
         async Task StopAllAsync()
         {
+            Proxy.Stop();
+            _proxy = null;
             try
             {
                 using (var limit = new CancellationTokenSource(10000))
                 {
-                    if (Warp.Installed)
+                    // С собственным сервером WARP не нужен: трогаем его, только если он остался подключённым от прошлого режима.
+                    if (Warp.Installed && (!ProxyMode || await WarpIsActiveAsync(limit.Token)))
                     {
                         await Warp.DisconnectAsync(limit.Token);
                         if (!await Warp.SetEndpointAsync(null, limit.Token)) throw new IOException(L.T("err.endpoint"));
@@ -750,6 +982,12 @@ namespace Zarp.Core
                 }
             }
             finally { Zapret.Stop(); _activeStrategy = null; }
+        }
+
+        async Task<bool> WarpIsActiveAsync(CancellationToken ct)
+        {
+            var (status, _) = await Warp.StatusAsync(ct);
+            return status == "Connected" || status == "Connecting";
         }
 
         async Task<bool> TryStopAllAsync()
@@ -761,7 +999,110 @@ namespace Zarp.Core
         Msg DescribeSelected()
         {
             var s = Selected;
-            return s == null ? M("detail.warpConnected") : M("detail.strategy", s);
+            return s == null ? M(ProxyMode ? "detail.proxyConnected" : "detail.warpConnected") : M("detail.strategy", s);
+        }
+
+        // ------------------------------------------------------------------ собственный сервер
+
+        int ProxyTimeoutMs() => Math.Max(6, Math.Min(60, Config.TestTimeoutSec)) * 1000;
+
+        /// <summary>Подробность неудачи (текст сетевой ошибки и последняя ошибка sing-box) - в журнал, а не в список результатов.</summary>
+        void LogProxyDetail(ProxyMeasure measure)
+        {
+            if (!string.IsNullOrWhiteSpace(measure.Error)) Log.Write("  " + L.T("log.proxyDetail", measure.Error));
+            string box = Proxy.LastError();
+            if (!string.IsNullOrWhiteSpace(box)) Log.Write("  " + L.T("log.proxyDetail", box));
+        }
+
+        /// <summary>
+        /// Сессия sing-box для сервера из ссылки. Имя сервера разрешается один раз за операцию, пока системный DNS
+        /// ещё работает мимо туннеля. С адаптером добавляются правила маршрутизации и выбор программ.
+        /// </summary>
+        async Task<ProxySession> NewProxySessionAsync(ProxyProfile profile, bool tun, CancellationToken ct)
+        {
+            if (_proxyAddress == null) _proxyAddress = await Proxy.ResolveAsync(profile.Host, ct);
+            var session = Proxy.NewSession(profile);
+            session.Address = _proxyAddress;
+            session.Tun = tun;
+            session.Ipv6 = Config.ProxyIpv6;
+            session.Dns = Config.ProxyDns;
+            if (tun)
+            {
+                session.Rules = CompileRules(Config) ?? new List<object>();
+                if (Config.PerAppProxy)
+                {
+                    session.AppPaths = SelectedAppPaths();
+                    session.OwnPath = OwnExecutable();
+                }
+            }
+            return session;
+        }
+
+        /// <summary>Проверить собственный сервер: поднять sing-box без адаптера и сделать запросы через проверочный вход.</summary>
+        async Task<TestResult> TestProxyAsync(Strategy s, CancellationToken ct)
+        {
+            var res = new TestResult { StrategyId = s.Id, When = DateTime.Now, Endpoint = s.Profile.Endpoint };
+            ProxySession session;
+            try { session = await NewProxySessionAsync(s.Profile, tun: false, ct); }
+            catch (IOException e) { res.Fail(M("err.proxyFailed", e.Message)); return res; }
+            var err = await Proxy.StartAsync(session, ct);
+            if (err != null) { res.Fail(err); return res; }
+            try
+            {
+                var m = await Proxy.MeasureAsync(session, 3, ProxyTimeoutMs(), ct);
+                if (!m.Ok)
+                {
+                    res.Fail(M("err.proxyNoTraffic"));
+                    LogProxyDetail(m);
+                    return res;
+                }
+                res.Ok = true;
+                res.ConnectMs = m.FirstMs;
+                res.PingMs = m.PingMs;
+                return res;
+            }
+            finally { Proxy.Stop(); }
+        }
+
+        /// <summary>
+        /// Подключиться через собственный сервер. Сначала сервер проверяется без адаптера: неработающий сервер не должен
+        /// забрать весь трафик, а потом sing-box поднимается заново уже с виртуальным адаптером Zarp.
+        /// </summary>
+        async Task<bool> ApplyProxyAsync(Strategy s, CancellationToken ct)
+        {
+            await StopAllAsync();
+            bool Fail(Msg why)
+            {
+                Log.Write(why.ToString());
+                Proxy.Stop();
+                _proxy = null;
+                Set(EngineState.Idle, M("detail.connectFailed"));
+                return false;
+            }
+
+            ProxySession probe;
+            try { probe = await NewProxySessionAsync(s.Profile, tun: false, ct); }
+            catch (IOException e) { return Fail(M("err.proxyFailed", e.Message)); }
+            var err = await Proxy.StartAsync(probe, ct);
+            if (err != null) return Fail(err);
+            var check = await Proxy.MeasureAsync(probe, 1, ProxyTimeoutMs() * 2, ct);
+            if (!check.Ok) LogProxyDetail(check);
+            Proxy.Stop();
+            if (!check.Ok) return Fail(M("err.proxyNoTraffic"));
+
+            var session = await NewProxySessionAsync(s.Profile, tun: true, ct);
+            err = await Proxy.StartAsync(session, ct);
+            if (err != null) return Fail(err);
+            if (!await Proxy.WaitAdapterAsync(ct)) return Fail(M("err.singboxAdapter"));
+            // адаптер уже забрал весь трафик: если через него ничего не идёт, лучше сразу его убрать, чем оставить без сети
+            if (!await Proxy.CheckTunnelAsync(ProxyTimeoutMs(), ct)) return Fail(M("err.tunNoTraffic"));
+            var done = await Proxy.MeasureAsync(session, 1, ProxyTimeoutMs() * 2, ct);
+            if (!done.Ok) return Fail(M("err.proxyNoTraffic"));
+            ct.ThrowIfCancellationRequested();
+            _proxy = session;
+            Log.Write(L.T("log.proxyConnected", check.FirstMs, done.PingMs, s.Profile.Endpoint));
+            Set(EngineState.Connected, M("detail.strategy", s));
+            return true;
         }
     }
 }

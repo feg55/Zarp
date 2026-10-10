@@ -72,6 +72,12 @@ namespace Zarp.Core
             Dir = dir;
         }
 
+        /// <summary>
+        /// IP-адреса собственных эндпоинтов WARP (без портов). Они могут лежать вне диапазонов Cloudflare,
+        /// поэтому при ограничении по адресам их тоже нужно перехватывать, иначе стратегия до них не дойдёт.
+        /// </summary>
+        public IReadOnlyList<string> ExtraAddresses { get; set; } = new string[0];
+
         public bool Installed => RequiredFiles.All(f => File.Exists(Path.Combine(Dir, f)));
 
         // ------------------------------------------------------------------ установка и обновление
@@ -441,7 +447,7 @@ namespace Zarp.Core
                     a.Add("--wf-tcp-out=" + (restrictToWarpIps ? "1-65535" : "443"));
                     break;
             }
-            if (restrictToWarpIps) a.Add("--wf-raw-filter=" + WarpIpFilter());
+            if (restrictToWarpIps) a.Add("--wf-raw-filter=" + WarpIpFilter(ExtraAddresses));
             a.Add("--lua-init=@lua/zapret-lib.lua");
             a.Add("--lua-init=@lua/zapret-antidpi.lua");
             foreach (var b in Blobs)
@@ -450,13 +456,17 @@ namespace Zarp.Core
             return a;
         }
 
-        static string WarpIpFilter()
+        static string WarpIpFilter(IEnumerable<string> extra)
         {
             string Range(string ver, string lo, string hi) =>
                 $"({ver}.DstAddr>={lo} and {ver}.DstAddr<={hi}) or ({ver}.SrcAddr>={lo} and {ver}.SrcAddr<={hi})";
-            string v4 = string.Join(" or ", WarpRanges4.Select(r => Range("ip", r[0], r[1])));
-            string v6 = string.Join(" or ", WarpRanges6.Select(r => Range("ipv6", r[0], r[1])));
-            return $"(ip and ({v4})) or (ipv6 and ({v6}))";
+            string Single(string ver, string address) => $"{ver}.DstAddr=={address} or {ver}.SrcAddr=={address}";
+            var own = (extra ?? new string[0]).Where(a => System.Net.IPAddress.TryParse(a, out _)).Distinct().ToList();
+            var v4 = WarpRanges4.Select(r => Range("ip", r[0], r[1]))
+                .Concat(own.Where(a => !a.Contains(":")).Select(a => Single("ip", a)));
+            var v6 = WarpRanges6.Select(r => Range("ipv6", r[0], r[1]))
+                .Concat(own.Where(a => a.Contains(":")).Select(a => Single("ipv6", a)));
+            return $"(ip and ({string.Join(" or ", v4)})) or (ipv6 and ({string.Join(" or ", v6)}))";
         }
 
         /// <summary>

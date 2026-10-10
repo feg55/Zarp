@@ -187,15 +187,23 @@ namespace Zarp.Core
         readonly Dictionary<string, int> _endpointUses = new Dictionary<string, int>();
         public bool EndpointWasReused { get; private set; }
 
-        /// <summary>Наименее использованный эндпоинт, отличный от первого теста. Пулы адресов конечны.</summary>
-        public string NextEndpoint(WarpTransport t, string except = null)
+        /// <summary>
+        /// Наименее использованный эндпоинт, отличный от первого теста. Пулы адресов конечны.
+        /// Если задан свой список (custom), перебираются только его адреса: для обоих транспортов.
+        /// Единственный адрес изолировать нечем: тогда он берётся снова и считается повторным.
+        /// </summary>
+        public string NextEndpoint(WarpTransport t, string except = null, IReadOnlyList<string> custom = null)
         {
             var ips = t == WarpTransport.WireGuard ? WireGuardIps : MasqueIps;
             var ports = t == WarpTransport.WireGuard ? WireGuardPorts : t == WarpTransport.MasqueH2 ? new[] { 443 } : MasquePorts;
             string prefix = t + "/";
             int Uses(string endpoint) => _endpointUses.TryGetValue(prefix + endpoint, out var count) ? count : 0;
-            string next = ports.SelectMany(port => ips.Select(ip => ip + ":" + port))
-                .Where(endpoint => endpoint != except).OrderBy(Uses).First();
+            var pool = custom != null && custom.Count > 0
+                ? custom.ToList()
+                : ports.SelectMany(port => ips.Select(ip => ip + ":" + port)).ToList();
+            var candidates = pool.Where(endpoint => endpoint != except).ToList();
+            if (candidates.Count == 0) candidates = pool;
+            string next = candidates.OrderBy(Uses).First();
             int used = Uses(next);
             EndpointWasReused = used > 0;
             _endpointUses[prefix + next] = used + 1;

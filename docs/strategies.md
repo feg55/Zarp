@@ -18,6 +18,7 @@ The first packet of the WARP tunnel is a QUIC Initial. These strategies put some
 | WARP QUIC: fake google ttl=4 ×6 | Fakes with a short TTL: they expire on the way, so only DPI close to you sees them. |
 | WARP QUIC: IP fragmentation | Cuts the first packet into two IP fragments after the 8-byte UDP header. |
 | WARP QUIC: fake + IP fragmentation | 6 fakes, then the fragmented real packet. |
+| WARP QUIC: fake google ×12 | The same with 12 copies. Added late, so it is tested last. |
 
 ## TLS (MASQUE over HTTP/2)
 
@@ -32,6 +33,15 @@ The tunnel starts with a TLS ClientHello over TCP 443, which carries the server 
 | WARP TLS: fake vk badseq + disorder | A fake vk.com ClientHello with a wrong sequence number, then reversed segments. |
 | WARP TLS: hostfakesplit vk.com | A fake host name (vk.com) around the real one. |
 | WARP TLS: fake gosuslugi badack + split | A fake gosuslugi.ru ClientHello with a wrong acknowledgement number, then a split. |
+| WARP TLS: split 1,host | Cuts the ClientHello after the first byte and at the start of the server name. |
+| WARP TLS: split 1,sld | The same, but the second cut is at the start of the second-level domain. |
+| WARP TLS: split 1,endhost | The same, but the second cut is at the end of the server name. |
+
+## Countries
+
+Every strategy carries country tags (`ru`, `ir`, `cn`), and the filter above the strategy list in Settings takes several countries at once: lists, scans, the power button, rechecks and saved results all see the union of the chosen countries, and **All** clears the filter. Generic Google QUIC fakes and TLS splits are tagged for all three countries. Strategies built around fakes of Russian services (`vk`, `gosuslugi`) are tagged for Russia only. Strategies without desync (plain WARP, only possible as your own lines) are left out while a country is chosen.
+
+The tags are candidates for testing, not a promise that a strategy works with every provider in the country. The added `1,host`, `1,sld` and `1,endhost` splits and the `×12` variant use primitives from the zapret2 manual and still need testing on your network.
 
 ## Where the syntax comes from
 
@@ -58,8 +68,11 @@ What the tests cannot tell is whether your DPI is fooled. The search on your own
 Add them to `%LOCALAPPDATA%\Zarp\strategies.txt`, one per line:
 
 ```
-# name | transport (h3, h2, wg) | winws2 profile args
+# name | transport (h3, h2, wg) | winws2 profile args | countries (optional)
 My QUIC | h3 | --payload=quic_initial --lua-desync=fake:blob=quic_google:repeats=8
+My TLS  | h2 | --payload=tls_client_hello --lua-desync=multisplit:pos=1,sld | ru,ir,cn
 ```
+
+The optional fourth column lists the countries (`ru`, `ir`, `cn`) for which the line is offered by the country filter. Lines without it stay valid and appear under **All** only. Adding or removing the column keeps the strategy identity, so its saved results stay.
 
 Available blobs: `quic_google`, `quic_vk`, `tls_google`, `tls_vk`, `tls_gosuslugi`, `stun_fake`, `zero64`, plus `fake_default_quic` and `fake_default_tls` built into zapret2. See the [zapret2 manual](https://github.com/bol-van/zapret2/blob/master/docs/manual.en.md) for the `--lua-desync` syntax.

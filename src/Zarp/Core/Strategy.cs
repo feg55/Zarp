@@ -21,6 +21,7 @@ namespace Zarp.Core
     /// <summary>
     /// Стратегия = протокол туннеля WARP + профиль winws2 (zapret2).
     /// Пустой Args означает «без zapret» - WARP подключается напрямую.
+    /// Если задан Profile, это не стратегия обхода, а собственный сервер, который заменяет WARP.
     /// </summary>
     public sealed class Strategy
     {
@@ -30,12 +31,22 @@ namespace Zarp.Core
         public string Args;
         public bool Custom;
         public string LegacyId;
+        /// <summary>
+        /// Страны (ru, ir, cn), для которых стратегию стоит проверять. Это метка кандидата, а не подтверждение,
+        /// что она работает у любого провайдера страны. Пустой список: стране не назначена, видна только при «All».
+        /// </summary>
+        public string[] Countries = new string[0];
+        /// <summary>Собственный сервер (VLESS, Trojan, Hysteria2) вместо WARP.</summary>
+        public ProxyProfile Profile;
 
-        public bool UsesZapret => !string.IsNullOrWhiteSpace(Args);
+        public bool IsProxy => Profile != null;
+        public bool UsesZapret => !IsProxy && !string.IsNullOrWhiteSpace(Args);
+        public string ProtocolTitle => IsProxy ? Profile.Title : TransportTitle(Transport);
 
         public Strategy Clone() => new Strategy
         {
             Id = Id, Name = Name, Transport = Transport, Args = Args, Custom = Custom, LegacyId = LegacyId,
+            Countries = Countries, Profile = Profile,
         };
 
         public static string TransportTitle(WarpTransport t)
@@ -80,8 +91,15 @@ namespace Zarp.Core
         // в strategies.txt (транспорт wg).
         // Стратегии без zapret («WARP как есть») намеренно нет: Zarp нужен там, где WARP сам не подключается.
         // Порядок важен: поиск идёт сверху вниз и в быстром режиме останавливается на нескольких рабочих.
-        // Поэтому первыми стоят самые проверенные варианты, причём h3 и h2 чередуются.
+        // Поэтому первыми стоят самые проверенные варианты, причём h3 и h2 чередуются, а новые, ещё не обкатанные
+        // варианты (разбиение по host/sld/endhost, fake google x12) стоят в конце.
         // Имена технические и одинаковые на всех языках: fake, ttl - термины zapret из аргументов.
+
+        static readonly string[] AllCountries = { "ru", "ir", "cn" };
+        static readonly string[] RussiaOnly = { "ru" };
+        // Фейки российских сервисов имеют смысл там, где DPI пропускает именно их: метка только «ru».
+        static readonly string[] RussianFakes = { "vk", "gosuslugi" };
+        // (эти поля стоят выше списка: статические инициализаторы выполняются по порядку, а S() ими пользуется)
         static readonly Strategy[] BuiltIn =
         {
             S("warp-q-google6",   "WARP QUIC: fake google ×6",            WarpTransport.MasqueH3,
@@ -114,13 +132,25 @@ namespace Zarp.Core
               "--payload=tls_client_hello --lua-desync=hostfakesplit:host=vk.com:tcp_md5"),
             S("warp-t-fake-multi","WARP TLS: fake gosuslugi badack + split", WarpTransport.MasqueH2,
               "--payload=tls_client_hello --lua-desync=fake:blob=tls_gosuslugi:tcp_ack=-66000:tcp_ts_up:repeats=6 --lua-desync=multisplit:pos=1,midsld"),
+            // Разбиение ClientHello по маркерам zapret2 host, sld и endhost и ещё один вариант с числом фейков.
+            S("warp-t-split-host", "WARP TLS: split 1,host",              WarpTransport.MasqueH2,
+              "--payload=tls_client_hello --lua-desync=multisplit:pos=1,host"),
+            S("warp-q-google12",  "WARP QUIC: fake google ×12",           WarpTransport.MasqueH3,
+              "--payload=quic_initial --lua-desync=fake:blob=quic_google:repeats=12"),
+            S("warp-t-split-sld", "WARP TLS: split 1,sld",                WarpTransport.MasqueH2,
+              "--payload=tls_client_hello --lua-desync=multisplit:pos=1,sld"),
+            S("warp-t-split-endhost", "WARP TLS: split 1,endhost",        WarpTransport.MasqueH2,
+              "--payload=tls_client_hello --lua-desync=multisplit:pos=1,endhost"),
         };
 
         /// <summary>Встроенные стратегии (для тестов и описания). Список только для чтения.</summary>
         public static IReadOnlyList<Strategy> BuiltInStrategies => BuiltIn;
 
-        static Strategy S(string id, string name, WarpTransport t, string args) =>
-            new Strategy { Id = id, Name = name, Transport = t, Args = args };
+        static Strategy S(string id, string name, WarpTransport t, string args) => new Strategy
+        {
+            Id = id, Name = name, Transport = t, Args = args,
+            Countries = RussianFakes.Any(f => args.Contains(f)) ? RussiaOnly : AllCountries,
+        };
 
         public const string CustomFileName = "strategies.txt";
 
@@ -149,7 +179,8 @@ namespace Zarp.Core
             {
                 string line = raw.Trim();
                 if (line.Length == 0 || line.StartsWith("#")) continue;
-                var parts = line.Split(new[] { '|' }, 3);
+                // четвёртое поле (страны) необязательно: строки старого формата из трёх полей остаются верными
+                var parts = line.Split(new[] { '|' }, 4);
                 if (parts.Length < 3 || !Strategy.TryParseTransport(parts[1], out var t))
                 {
                     Log.Write(L.T("log.customSkipped", CustomFileName, line));
@@ -159,6 +190,7 @@ namespace Zarp.Core
                 string args = parts[2].Trim();
                 if (name.Length == 0) continue;
                 string id;
+                // страны в идентификатор не входят: добавленная метка не должна обнулять сохранённые результаты
                 using (var hash = SHA256.Create())
                     id = "custom-" + BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(name + "\n" + t + "\n" + args))).Replace("-", "").ToLowerInvariant();
                 if (!seen.Add(id)) continue;
@@ -170,6 +202,7 @@ namespace Zarp.Core
                     Transport = t,
                     Args = args,
                     Custom = true,
+                    Countries = parts.Length > 3 ? StrategyFilter.ParseCountries(parts[3]) : new string[0],
                 };
             }
         }
@@ -177,13 +210,15 @@ namespace Zarp.Core
         // Файл настройки для опытных пользователей: синтаксис технический, поэтому комментарии на английском.
         const string CustomTemplate =
 @"# Custom Zarp strategies. One line = one strategy:
-#   Name | transport | winws2 profile arguments
+#   Name | transport | winws2 profile arguments | countries (optional)
 # transport: h3 (MASQUE/QUIC), h2 (MASQUE/TLS), wg (WireGuard)
+# countries: ru,ir,cn. Lines without them stay available under ""All"" in the country filter.
 # Blobs: quic_google, quic_vk, tls_google, tls_vk, tls_gosuslugi, stun_fake, zero64, fake_default_quic, fake_default_tls
 # Zarp adds the WinDivert filter, lua-init and blobs itself.
 #
 # Examples:
 # My QUIC | h3 | --payload=quic_initial --lua-desync=fake:blob=quic_google:repeats=8
+# My TLS  | h2 | --payload=tls_client_hello --lua-desync=multisplit:pos=1,sld | ru,ir,cn
 # My WG   | wg | --payload=wireguard_initiation --lua-desync=fake:blob=zero64:repeats=12
 ";
     }

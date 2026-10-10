@@ -23,7 +23,9 @@ namespace Zarp.Core
         {
             if (status != OperationalStatus.Up) return false;
             string text = name + " " + description;
-            if (text.IndexOf("Cloudflare", StringComparison.OrdinalIgnoreCase) >= 0 || WindowsIpv6Tunnel.IsMatch(text))
+            // свой адаптер Zarp (подключение через собственный сервер) тоже не сторонний
+            if (text.IndexOf("Cloudflare", StringComparison.OrdinalIgnoreCase) >= 0 || WindowsIpv6Tunnel.IsMatch(text)
+                || string.Equals(name, SingBox.TunName, StringComparison.OrdinalIgnoreCase))
                 return false;
             bool tunnelType = type == NetworkInterfaceType.Tunnel || type == NetworkInterfaceType.Ppp;
             if (!tunnelType && !VpnLike.IsMatch(text)) return false;

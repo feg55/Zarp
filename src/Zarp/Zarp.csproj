@@ -25,11 +25,24 @@
     <Warning Text="vendor\zapret2.zip не найден, zapret2 не будет вшит в exe. Запустите tools\fetch-zapret.ps1." />
   </Target>
 
+  <!-- sing-box (движок собственного сервера) вшивается так же; архив готовит tools\fetch-singbox.ps1. Без него режим «свой сервер» недоступен. -->
+  <ItemGroup Condition="Exists('..\..\vendor\singbox.zip')">
+    <EmbeddedResource Include="..\..\vendor\singbox.zip" LogicalName="singbox.zip" />
+  </ItemGroup>
+  <Target Name="WarnNoSingBox" BeforeTargets="Build" Condition="!Exists('..\..\vendor\singbox.zip')">
+    <Warning Text="vendor\singbox.zip не найден, sing-box не будет вшит в exe. Запустите tools\fetch-singbox.ps1." />
+  </Target>
+
   <!-- лицензии Zarp и вшитых компонентов: едут внутри exe и распаковываются в %LOCALAPPDATA%\Zarp\licenses -->
   <ItemGroup>
     <EmbeddedResource Include="..\..\LICENSE" LogicalName="licenses/LICENSE.txt" />
     <EmbeddedResource Include="..\..\THIRD_PARTY_NOTICES.md" LogicalName="licenses/THIRD_PARTY_NOTICES.md" />
     <EmbeddedResource Include="..\..\licenses\*.txt" LogicalName="licenses/%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <!-- встроенные IP-диапазоны России, Ирана и Китая (ipverse/country-ip-blocks, CC0): Routes\<страна>.txt → ресурс routes/<страна>.txt -->
+  <ItemGroup>
+    <EmbeddedResource Include="Routes\*.txt" LogicalName="routes/%(Filename)%(Extension)" />
   </ItemGroup>
 
   <!-- переводы интерфейса: Lang\<код>.txt → ресурс lang/<код>.txt -->

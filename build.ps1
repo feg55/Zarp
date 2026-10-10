@@ -1,4 +1,4 @@
-# Local build: dist\Zarp.exe - a single file with zapret2 embedded.
+# Local build: dist\Zarp.exe - a single file with zapret2 and sing-box embedded.
 # Releases are built by GitHub Actions (.github/workflows/build.yml) the same way.
 param([string]$Version = '0.0.0')
 $ErrorActionPreference = 'Stop'
@@ -6,6 +6,7 @@ $root = $PSScriptRoot
 $obj = Join-Path $root 'out'
 
 & (Join-Path $root 'tools\fetch-zapret.ps1')
+& (Join-Path $root 'tools\fetch-singbox.ps1')
 
 dotnet build (Join-Path $root 'src\Zarp\Zarp.csproj') -c Release -o $obj -p:Version=$Version
 if ($LASTEXITCODE -ne 0) { throw 'build failed' }

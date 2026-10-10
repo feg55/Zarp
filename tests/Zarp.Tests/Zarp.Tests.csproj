@@ -8,5 +8,6 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Zarp/Zarp.csproj" />
     <Reference Include="System.Net.Http" />
+    <Reference Include="System.Web.Extensions" />
   </ItemGroup>
 </Project>

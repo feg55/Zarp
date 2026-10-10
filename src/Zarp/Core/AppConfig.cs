@@ -73,6 +73,25 @@ namespace Zarp.Core
         /// <summary>Код языка интерфейса; null - как в системе.</summary>
         public string Language { get; set; }
 
+        /// <summary>Страны, чьи стратегии участвуют в подборе: «all» или список вида «ru,cn» (см. StrategyFilter).</summary>
+        public string StrategyCountry { get; set; } = StrategyFilter.All;
+        /// <summary>Свои эндпоинты WARP, по одному IP:порт или [IPv6]:порт на строку. Пусто - адреса по умолчанию.</summary>
+        public string CustomEndpoints { get; set; } = "";
+        /// <summary>Вместо WARP использовать собственный сервер из ссылки ProxyUri.</summary>
+        public bool UseProxy { get; set; } = false;
+        /// <summary>Ссылка vless://, trojan:// или hysteria2:// (hy2://). Содержит пароль: в журнал не попадает.</summary>
+        public string ProxyUri { get; set; } = "";
+        /// <summary>Пропускать IPv6 через собственный сервер. Если у сервера нет IPv6, его лучше выключить.</summary>
+        public bool ProxyIpv6 { get; set; } = true;
+        /// <summary>DNS-сервер для запросов через собственный сервер (первый IP из списка через запятую).</summary>
+        public string ProxyDns { get; set; } = "1.1.1.1";
+        /// <summary>Через собственный сервер идут только выбранные программы, остальные подключаются как обычно.</summary>
+        public bool PerAppProxy { get; set; } = false;
+        /// <summary>Полные пути exe выбранных программ.</summary>
+        public List<string> ProxyApps { get; set; } = new List<string>();
+        /// <summary>Правила маршрутизации для собственного сервера (наборы, действующий набор, адреса баз GeoIP и GeoSite).</summary>
+        public RoutingSettings Routing { get; set; } = new RoutingSettings();
+
         string _path;
         bool _recovered;
         readonly object _saveLock = new object();
@@ -103,6 +122,14 @@ namespace Zarp.Core
         {
             TestTimeoutSec = Math.Max(5, Math.Min(60, TestTimeoutSec));
             StopAfterWorking = Math.Max(0, Math.Min(100, StopAfterWorking));
+            StrategyCountry = StrategyFilter.Normalize(StrategyCountry);
+            CustomEndpoints = CustomEndpoints ?? "";
+            ProxyUri = ProxyUri ?? "";
+            ProxyDns = string.IsNullOrWhiteSpace(ProxyDns) ? "1.1.1.1" : ProxyDns.Trim();
+            Routing = Routing ?? new RoutingSettings();
+            Routing.Normalize();
+            ProxyApps = (ProxyApps ?? new List<string>()).Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => p.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             Results = Results ?? new Dictionary<string, TestResult>();
             foreach (var entry in Results.ToList())
             {

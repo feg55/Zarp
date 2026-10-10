@@ -44,6 +44,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./tools/fetch-zapret.ps1
 
+      - name: Fetch sing-box
+        shell: powershell
+        run: ./tools/fetch-singbox.ps1
+
       - name: Version
         id: ver
         shell: pwsh   # pwsh пишет GITHUB_OUTPUT в UTF-8 (Windows PowerShell 5 - в UTF-16)

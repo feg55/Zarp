@@ -173,7 +173,6 @@ namespace Zarp.UI
         /// <summary>Все тексты окна и меню трея на текущем языке. Вызывается и при смене языка.</summary>
         void ApplyTexts()
         {
-            _sub.Text = L.T("main.subtitle");
             _tips.SetToolTip(_settings, L.T("main.settingsTip"));
             _tips.SetToolTip(_language, L.T("main.languageTip"));
             _settings.AccessibleName = L.T("main.settingsTip");
@@ -296,15 +295,17 @@ namespace Zarp.UI
                     _status.Text = L.T("status.disconnected"); _status.ForeColor = Theme.Text; break;
             }
             _detail.Text = _engine.Detail;
+            // с собственным сервером вместо WARP: другой подзаголовок и подсказки, установка WARP не нужна
+            _sub.Text = L.T(_engine.ProxyMode ? "proxy.subtitle" : "main.subtitle");
 
             if (busy)
                 _hint.Text = L.T("hint.cancel");
             else if (st == EngineState.Connected)
                 _hint.Text = L.T("hint.disconnect");
-            else if (!_engine.Warp.Installed)
+            else if (!_engine.ProxyMode && !_engine.Warp.Installed)
                 _hint.Text = L.T("hint.installWarp");
             else if (_engine.Selected == null)
-                _hint.Text = L.T("hint.firstRun");
+                _hint.Text = L.T(_engine.ProxyMode ? "hint.proxyFirstRun" : "hint.firstRun");
             else
                 _hint.Text = L.T("hint.connect");
 

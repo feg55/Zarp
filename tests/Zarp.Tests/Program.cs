@@ -34,6 +34,7 @@ static partial class Program
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
         // Isolate UI tests from embedded driver extraction, WARP, and background downloads.
         typeof(Zapret).GetField("_embeddedVersion", BindingFlags.NonPublic | BindingFlags.Static).SetValue(null, "");
+        typeof(SingBox).GetField("_embeddedVersion", BindingFlags.NonPublic | BindingFlags.Static).SetValue(null, "");
         // Tests must never find, start or install the real Cloudflare WARP: the search always comes back empty
         // (individual tests substitute their own results).
         typeof(Warp).GetField("Finder", PrivateStatic).SetValue(null, (Func<WarpLocator.Result>)Missing);
@@ -98,6 +99,10 @@ static partial class Program
             "Renaming Teredo must not cause a VPN warning");
         Check(!IsVpn("CloudflareWARP", "Cloudflare WARP", NetworkInterfaceType.Tunnel, OperationalStatus.Up, "172.16.0.1"),
             "WARP itself must be excluded");
+        Check(!IsVpn("Zarp", "sing-tun Tunnel", NetworkInterfaceType.Tunnel, OperationalStatus.Up, "172.19.0.2") &&
+              !IsVpn("zarp", "Wintun Userspace Tunnel", NetworkInterfaceType.Tunnel, OperationalStatus.Up, "172.19.0.2") &&
+              IsVpn("Zarp 2", "sing-tun Tunnel", NetworkInterfaceType.Tunnel, OperationalStatus.Up, "172.19.0.2"),
+            "The adapter of Zarp's own server mode is not another VPN, but only that exact name");
         Check(!IsVpn("happ-tun", "sing-tun", NetworkInterfaceType.Tunnel, OperationalStatus.Down, "172.18.0.2"),
             "Disabled VPN must be excluded");
         Check(!IsVpn("happ-tun", "sing-tun", NetworkInterfaceType.Tunnel, OperationalStatus.Up, "0.0.0.0", "::"),
@@ -343,6 +348,81 @@ static partial class Program
                     state.SetValue(engine, EngineState.Idle);
                     update.Invoke(settings, null);
                 }
+                // сервер и эндпоинты: обе страницы окна, с подсказкой и с сообщением об ошибке
+                using (var connection = NewForm("ConnectionForm", engine))
+                {
+                    PositionOffscreen(connection);
+                    connection.Show();
+                    Application.DoEvents();
+                    var useProxy = GetPrivate<Control>(connection, "_useProxy");
+                    var endpoints = GetPrivate<Control>(connection, "_endpoints");
+                    var link = GetPrivate<Control>(connection, "_link");
+                    foreach (string text in new[] { "", "bad", "162.159.198.2:443" })
+                    {
+                        endpoints.Text = text;
+                        Application.DoEvents();
+                        CheckLayout(connection, code + " (WARP, \"" + text + "\")");
+                    }
+                    SaveImage(connection, "connection-" + code + ".png");
+                    SetChecked(useProxy, true);
+                    foreach (string text in new[] { "", "x", "trojan://secret@proxy.example:443" })
+                    {
+                        link.Text = text;
+                        Application.DoEvents();
+                        CheckLayout(connection, code + " (server, \"" + text + "\")");
+                    }
+                    SaveImage(connection, "connection-server-" + code + ".png");
+                }
+                // маршрутизация, пресеты, базы GeoIP/GeoSite и выбор программ: раскладка во всех языках, в обоих режимах
+                UseFixedApps(FixedApps(SystemTool("notepad.exe"), SystemTool("cmd.exe")));
+                foreach (bool server in new[] { false, true })
+                {
+                    engine.Config.UseProxy = server;
+                    string mode = code + (server ? " (server)" : " (WARP)");
+                    using (var routing = NewForm("RoutingForm", engine))
+                    {
+                        PositionOffscreen(routing);
+                        routing.Show();
+                        Application.DoEvents();
+                        CheckLayout(routing, mode + " routing");
+                        if (!server) SaveImage(routing, "routing-" + code + ".png");
+                    }
+                    using (var apps = NewForm("AppsForm", engine))
+                    {
+                        PositionOffscreen(apps);
+                        apps.Show();
+                        PumpUntil(() => GetPrivate<bool>(apps, "_loaded"), "Loading the program list");
+                        CheckLayout(apps, mode + " programs");
+                        if (!server) SaveImage(apps, "apps-" + code + ".png");
+                    }
+                }
+                engine.Config.UseProxy = false;
+                using (var geo = NewForm("GeoSourcesForm", engine))
+                {
+                    PositionOffscreen(geo);
+                    geo.Show();
+                    Application.DoEvents();
+                    CheckLayout(geo, code + " geo");
+                    SaveImage(geo, "geo-" + code + ".png");
+                    var sections = (System.Collections.IList)GetPrivate<object>(geo, "_sections");
+                    var url = (Control)sections[0].GetType().GetField("Url").GetValue(sections[0]);
+                    url.Text = "http://wrong";
+                    Application.DoEvents();
+                    CheckLayout(geo, code + " geo (invalid address)");
+                }
+                foreach (var preset in new[] { new RoutingPreset { Id = "custom-1", Name = "Work", Direct = "geoip:private" }, RoutingSettings.Original("ru") })
+                using (var form = NewForm("PresetForm", preset, false))
+                {
+                    PositionOffscreen(form);
+                    form.Show();
+                    Application.DoEvents();
+                    CheckLayout(form, code + " preset " + preset.Id);
+                    if (preset.Id == "custom-1") SaveImage(form, "preset-" + code + ".png");
+                    GetPrivate<Control>(form, "_direct").Text = "bad rule here";
+                    form.GetType().GetMethod("TrySave", PrivateInstance).Invoke(form, null);
+                    Application.DoEvents();
+                    CheckLayout(form, code + " preset " + preset.Id + " (error)");
+                }
                 using (var main = NewMain(engine))
                 {
                     CheckLayout(main, code);
@@ -471,7 +551,7 @@ static partial class Program
         string src = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "src", "Zarp"));
         if (!Directory.Exists(src))
             throw new TestSkippedException("Sources not found at " + src + ", key usage was not checked");
-        var pattern = new Regex("\"((?:main|lang|status|hint|tray|dlg|close|settings|col|btn|tip|opt|result|strategy|detail|progress|err|log)\\.[A-Za-z0-9]+)\"");
+        var pattern = new Regex("\"((?:main|lang|status|hint|tray|dlg|close|settings|col|btn|tip|opt|result|strategy|detail|progress|err|log|filter|country|endpoint|proxy|routing|geo|apps)\\.[A-Za-z0-9]+)\"");
         var used = new HashSet<string>(Directory.GetFiles(src, "*.cs", SearchOption.AllDirectories)
             .SelectMany(f => pattern.Matches(File.ReadAllText(f)).Cast<Match>().Select(m => m.Groups[1].Value)));
         var defined = new HashSet<string>(L.KeysOf("en"));
@@ -1191,6 +1271,10 @@ static partial class Program
         readonly System.Net.Sockets.TcpListener _listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
         readonly ManualResetEvent _stop = new ManualResetEvent(false);
         readonly byte[] _payload;
+        int _requests;
+
+        /// <summary>Сколько запросов дошло до сервера (с любым путём).</summary>
+        public int Requests => _requests;
 
         public FakeServer(byte[] payload)
         {
@@ -1227,6 +1311,8 @@ static partial class Program
                     var one = new byte[1];
                     while (!request.ToString().EndsWith("\r\n\r\n") && stream.Read(one, 0, 1) == 1) request.Append((char)one[0]);
                     string path = request.ToString().Split('\n')[0].Split(' ')[1];
+                    Interlocked.Increment(ref _requests);
+                    if (path.Contains("?")) path = path.Substring(0, path.IndexOf('?')); // запрос проверки приходит с уникальной меткой
 
                     void Headers(string status, long length, string extra = "")
                     {
@@ -1247,6 +1333,14 @@ static partial class Program
                         case "/ok":
                             Headers("200 OK", _payload.Length);
                             stream.Write(_payload, 0, _payload.Length);
+                            break;
+                        case "/trace": // как настоящая страница cdn-cgi/trace: поле ip есть
+                        case "/portal": // страница провайдера: код 200, но трассировки нет
+                            var text = System.Text.Encoding.ASCII.GetBytes(path == "/trace"
+                                ? "fl=1f1\nh=www.cloudflare.com\nip=203.0.113.9\nts=1\nvisit_scheme=https\nwarp=off\n"
+                                : "<html><body>Sign in to the network</body></html>");
+                            Headers("200 OK", text.Length);
+                            stream.Write(text, 0, text.Length);
                             break;
                         case "/redirect":
                             Headers("302 Found", 0, "Location: " + Url("/ok") + "\r\n");

@@ -61,6 +61,36 @@ static partial class Program
         Add(nameof(TestStrategyLuaSymbols), TestStrategyLuaSymbols);
         Add(nameof(TestRestoreEmbeddedFiles), TestRestoreEmbeddedFiles);
         Add(nameof(TestSearchRules), TestSearchRules);
+        Add(nameof(TestStrategyCountries), TestStrategyCountries);
+        Add(nameof(TestEndpointParser), TestEndpointParser);
+        Add(nameof(TestCustomEndpointPool), TestCustomEndpointPool);
+        Add(nameof(TestWarpFilterWithOwnEndpoints), TestWarpFilterWithOwnEndpoints);
+        Add(nameof(TestCountryFilterInEngineAsync), () => Wait(TestCountryFilterInEngineAsync));
+        Add(nameof(TestOwnEndpointsInEngineAsync), () => Wait(TestOwnEndpointsInEngineAsync));
+        Add(nameof(TestRouteRuleParsing), TestRouteRuleParsing);
+        Add(nameof(TestRoutingSettings), TestRoutingSettings);
+        Add(nameof(TestRouteCompile), TestRouteCompile);
+        Add(nameof(TestGeoDatValidation), TestGeoDatValidation);
+        Add(nameof(TestGeoDataDownload), TestGeoDataDownload);
+        Add(nameof(TestInstalledApps), TestInstalledApps);
+        Add(nameof(TestRoutingForm), TestRoutingForm);
+        Add(nameof(TestPresetForm), TestPresetForm);
+        Add(nameof(TestGeoSourcesForm), TestGeoSourcesForm);
+        Add(nameof(TestAppsForm), TestAppsForm);
+        Add(nameof(TestProxyProfiles), TestProxyProfiles);
+        Add(nameof(TestProxyConfig), TestProxyConfig);
+        Add(nameof(TestProxyModeEngineAsync), () => Wait(TestProxyModeEngineAsync));
+        Add(nameof(TestProxyModeFailuresAsync), () => Wait(TestProxyModeFailuresAsync));
+        Add(nameof(TestProxyModeWindows), TestProxyModeWindows);
+        Add(nameof(TestConnectionForm), TestConnectionForm);
+        Add(nameof(TestCountryFilterControl), TestCountryFilterControl);
+        Add(nameof(TestSingBoxLaunchRetry), TestSingBoxLaunchRetry);
+        Add(nameof(TestSingBoxConfigsAccepted), TestSingBoxConfigsAccepted);
+        Add(nameof(TestProxyMeasure), TestProxyMeasure);
+        Add(nameof(TestSingBoxTamper), TestSingBoxTamper);
+        tests.Add(new TestCase { Name = nameof(TestRoutingEndToEnd), Body = TestRoutingEndToEnd, TimeoutMs = 240000 });
+        foreach (var variant in new[] { "vless", "trojan", "hysteria2", "vless-ws", "trojan-grpc", "vless-httpupgrade" })
+            Add($"TestSingBoxLoopback[{variant}]", () => TestSingBoxLoopback(variant));
         Add(nameof(TestForeignVpnPolicy), TestForeignVpnPolicy);
         Add(nameof(TestDialog), TestDialog);
         Add("TestClose[cancel=True,remember=True,tray=True]", () => TestClose(true, true, true));
@@ -215,7 +245,7 @@ static partial class Program
             Console.WriteLine($"[{result.Status}] {test.Name} ({result.Seconds:F2}s, {result.Checks} checks)");
             if (result.Status == "PASS" && result.Stdout.Contains(LaunchRetryMarker))
             {
-                const string note = "winws2 was killed by the Windows loader (0xC0000142) and started again; the case passed on a later launch. See winws2.txt in the case directory.";
+                const string note = "A process (winws2 or sing-box) was killed by the Windows loader (0xC0000142) and started again; the case passed on a later launch. The case output names it, and winws2.txt in the case directory keeps the winws2 launches.";
                 Console.WriteLine(annotations && Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true"
                     ? "::warning title=" + Annotation(test.Name, true) + "::" + note
                     : "Note: " + note);
@@ -289,9 +319,19 @@ static partial class Program
     {
         // Preserve the last complete report if the job is interrupted while writing the next one.
         string temporary = path + ".tmp";
-        File.WriteAllText(temporary, content, new UTF8Encoding(false));
-        if (File.Exists(path)) File.Replace(temporary, path, null);
-        else File.Move(temporary, path);
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                File.WriteAllText(temporary, content, new UTF8Encoding(false));
+                if (File.Exists(path)) File.Replace(temporary, path, null);
+                else File.Move(temporary, path);
+                return;
+            }
+            // A virus scanner or an indexer may hold a freshly written report for a moment; losing the whole run to that is worse than waiting.
+            catch (IOException) when (attempt < 8) { Thread.Sleep(100 * attempt); }
+            catch (UnauthorizedAccessException) when (attempt < 8) { Thread.Sleep(100 * attempt); }
+        }
     }
 
     static string QuoteArgument(string value)
